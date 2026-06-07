@@ -1,0 +1,16 @@
+# deps
+node_modules/
+server/node_modules/
+
+# build
+dist/
+
+# datos sensibles / locales (NO subir)
+server/db.json
+server/server.log
+*.log
+
+# sistema
+.DS_Store
+.env
+.env.*
