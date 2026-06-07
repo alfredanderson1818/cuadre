@@ -51,15 +51,13 @@ const listeners = new Set();
 let saveTimer = null;
 function emit(persist = true) {
   listeners.forEach((l) => l());
-  if (!persist) return;
-  if (DEMO) {
-    if (token) localStorage.setItem(D_STATE, JSON.stringify(state));
+  if (!persist || !token) return;
+  if (DEMO || token === "local") {
+    localStorage.setItem(D_STATE, JSON.stringify(state));
     return;
   }
-  if (token) {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => { api("/state", { method: "PUT", body: { state } }).catch(() => {}); }, 450);
-  }
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { api("/state", { method: "PUT", body: { state } }).catch(() => {}); }, 450);
 }
 function subscribe(l) { listeners.add(l); return () => listeners.delete(l); }
 function snapshot() { return state; }
@@ -233,17 +231,22 @@ function seedDemoState() {
 }
 
 /* ---- Sesión / multi-cliente ------------------------------- */
+// Acceso rápido temporal (mientras montamos Firebase)
+function isAdmin(email, password) {
+  return (email || "").trim().toLowerCase() === "admin" && (password || "") === "admin";
+}
+
 export function getToken() {
-  if (DEMO) return localStorage.getItem(D_SESSION) ? "demo" : null;
-  return token;
+  return token || (localStorage.getItem(D_SESSION) ? "local" : null);
 }
 export function getSession() {
-  if (DEMO) { try { return JSON.parse(localStorage.getItem(D_SESSION)); } catch (e) { return null; } }
-  return token ? (profile || { name: "", email: "" }) : null;
+  if (profile) return profile;
+  try { const ds = localStorage.getItem(D_SESSION); if (ds) return JSON.parse(ds); } catch (e) { /* ignore */ }
+  return token ? { name: "", email: "" } : null;
 }
 
 export async function register({ email, password, name }) {
-  if (DEMO) return demoEnter(email, name, true);
+  if (DEMO || isAdmin(email, password)) return localEnter(email, name, true);
   const r = await api("/register", { method: "POST", body: { email, password, name } });
   token = r.token; localStorage.setItem(TOKEN_KEY, token);
   profile = r.user;
@@ -251,7 +254,8 @@ export async function register({ email, password, name }) {
   return r.user;
 }
 export async function login(email, password) {
-  if (DEMO) return demoEnter(email, null, false);
+  if (isAdmin(email, password)) return localEnter("admin@cuadre.com", "Admin", false);
+  if (DEMO) return localEnter(email, null, false);
   const r = await api("/login", { method: "POST", body: { email, password } });
   token = r.token; localStorage.setItem(TOKEN_KEY, token);
   profile = r.user;
@@ -259,26 +263,19 @@ export async function login(email, password) {
   return r.user;
 }
 export function logout() {
-  if (DEMO) {
-    localStorage.removeItem(D_SESSION); localStorage.removeItem(D_STATE);
-    token = null; profile = null; state = emptyState(); emit(false);
-    return;
-  }
-  token = null; profile = null;
-  localStorage.removeItem(TOKEN_KEY);
-  state = emptyState();
-  emit(false);
+  localStorage.removeItem(D_SESSION); localStorage.removeItem(D_STATE); localStorage.removeItem(TOKEN_KEY);
+  token = null; profile = null; state = emptyState(); emit(false);
 }
 // Restaura sesión al abrir la app
 export async function bootstrap() {
-  if (DEMO) {
-    const sess = getSession();
-    if (!sess) return null;
-    token = "demo"; profile = sess;
+  // sesión local (admin / demo) tiene prioridad
+  const ds = localStorage.getItem(D_SESSION);
+  if (ds && (!token || token === "local")) {
+    token = "local"; profile = JSON.parse(ds);
     try { state = { ...emptyState(), ...JSON.parse(localStorage.getItem(D_STATE)) }; }
-    catch (e) { state = seedDemoState(); }
+    catch (e) { state = seedDemoState(); localStorage.setItem(D_STATE, JSON.stringify(state)); }
     emit(false);
-    return sess;
+    return profile;
   }
   if (!token) return null;
   const me = await api("/me");
@@ -292,13 +289,13 @@ async function loadState() {
   emit(false);
 }
 
-// Crea/entra a una cuenta demo local
-function demoEnter(email, name, isNew) {
+// Crea/entra a una sesión local (admin o demo), guardada en el navegador
+function localEnter(email, name, isNew) {
   const clean = (email || "demo@cuadre.com").trim();
   const existing = localStorage.getItem(D_STATE);
   const sess = { email: clean, name: (name || clean.split("@")[0]).trim(), business: "", phone: "" };
   localStorage.setItem(D_SESSION, JSON.stringify(sess));
-  token = "demo"; profile = sess;
+  token = "local"; profile = sess;
   state = (isNew || !existing) ? seedDemoState() : { ...emptyState(), ...JSON.parse(existing) };
   localStorage.setItem(D_STATE, JSON.stringify(state));
   emit(false);

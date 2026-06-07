@@ -416,6 +416,13 @@ input, select { font-family: inherit; }
   padding: 11px 14px; border-radius: 12px; margin-bottom: 14px; border: 1px solid rgba(255,107,94,0.25);
 }
 .auth-link { color: var(--green); cursor: pointer; font-weight: 700; }
+.auth-quick {
+  width: 100%; margin-top: 10px; padding: 11px; border-radius: 12px;
+  background: transparent; border: 1px dashed var(--line-hi); color: var(--txt-soft);
+  font-size: 13px; font-weight: 600;
+}
+.auth-quick b { color: var(--green); }
+.auth-quick:active { transform: scale(0.98); }
 
 /* SPLASH */
 .splash { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; }

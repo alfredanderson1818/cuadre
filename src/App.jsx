@@ -204,7 +204,7 @@ function Login({ onLogin }) {
   return (
     <div className="shell auth">
       <div className="auth-glow" />
-      <form className="auth-card stagger" onSubmit={submit}>
+      <form className="auth-card stagger" onSubmit={submit} noValidate>
         <div className="auth-brand">
           <BrandMark size={44} />
           <div className="brand-name">Cua<b>dre</b></div>
@@ -219,8 +219,8 @@ function Login({ onLogin }) {
           </div>
         )}
         <div className="field">
-          <label>Correo</label>
-          <input className="input" type="email" inputMode="email" autoCapitalize="off" placeholder="tucorreo@ejemplo.com"
+          <label>Correo o usuario</label>
+          <input className="input" type="text" inputMode="email" autoCapitalize="off" placeholder="tucorreo@ejemplo.com"
             value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
         <div className="field">
@@ -234,6 +234,12 @@ function Login({ onLogin }) {
         <button className={`btn ${valid && !busy ? "btn-primary" : "btn-ghost"}`} type="submit" disabled={!valid || busy}>
           {busy ? "Un momento…" : isReg ? "Crear cuenta" : "Iniciar sesión"}
         </button>
+
+        {!isReg && (
+          <button type="button" className="auth-quick" onClick={() => { setEmail("admin"); setPass("admin"); }}>
+            Probar con <b>admin / admin</b>
+          </button>
+        )}
 
         <div className="auth-foot">
           {isReg ? (
