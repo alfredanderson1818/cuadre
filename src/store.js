@@ -13,6 +13,14 @@ export const CHANNELS = {
 
 const baseTime = 1749330000000; // referencia para ordenar/relativizar tiempos
 
+/* ---- Modo demo (GitHub Pages, sin backend) ---------------- */
+// En github.io no hay servidor: la app guarda todo en el navegador.
+// En local (u otro host con backend) usa la API real.
+export const DEMO = typeof location !== "undefined" &&
+  (location.hostname.endsWith("github.io") || location.search.includes("demo=1") || import.meta.env.VITE_DEMO === "1");
+const D_SESSION = "cuadre.demo.session";
+const D_STATE = "cuadre.demo.state";
+
 /* ---- Cliente del backend ---------------------------------- */
 const API = "/api";
 const TOKEN_KEY = "cuadre.token";
@@ -43,7 +51,12 @@ const listeners = new Set();
 let saveTimer = null;
 function emit(persist = true) {
   listeners.forEach((l) => l());
-  if (persist && token) {
+  if (!persist) return;
+  if (DEMO) {
+    if (token) localStorage.setItem(D_STATE, JSON.stringify(state));
+    return;
+  }
+  if (token) {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => { api("/state", { method: "PUT", body: { state } }).catch(() => {}); }, 450);
   }
@@ -189,11 +202,48 @@ export function relTime(ts, s) {
   return `hace ${d} d`;
 }
 
-/* ---- Sesión / multi-cliente (backend real) ---------------- */
-export function getToken() { return token; }
-export function getSession() { return token ? (profile || { name: "", email: "" }) : null; }
+/* ---- Estado demo inicial (solo modo Pages) ---------------- */
+function seedDemoState() {
+  const mk = (id, clientId, inId, inAmt, outId, outAmt, rate, costRate) => ({
+    id, ts: baseTime, date: new Date().toISOString(),
+    clientId, inId, inAmt, outId, outAmt, rate, costRate,
+    profitBs: +((rate - costRate) * inAmt).toFixed(2),
+  });
+  return {
+    rate: 760,
+    rates: { bcv: 563.29, euro: 654.87, binance: 758.76, updatedAt: null },
+    accounts: [
+      { id: "a1", kind: "cash", name: "Efectivo $", currency: "USD", balance: 1850 },
+      { id: "a2", kind: "usdt", name: "Binance USDT", currency: "USDT", balance: 3120 },
+      { id: "a3", kind: "zelle", name: "Zelle", currency: "USD", balance: 980 },
+      { id: "a4", kind: "bs", name: "Banco de Venezuela", currency: "BS", balance: 1520000 },
+      { id: "a5", kind: "bs", name: "Banesco", currency: "BS", balance: 760000 },
+    ],
+    clients: [
+      { id: "c1", name: "Ferretería La Económica", phone: "0414-1234567", note: "Paga IVA mensual" },
+      { id: "c2", name: "José Mendoza", phone: "0424-9876543", note: "" },
+      { id: "c3", name: "Inversiones RM C.A.", phone: "0212-5550101", note: "Cliente fijo, alto volumen" },
+    ],
+    ops: [
+      mk("o1", "c1", "a3", 500, "a4", 381000, 762, 750),
+      mk("o2", "c3", "a2", 1200, "a5", 910800, 759, 748),
+      mk("o3", "c2", "a1", 80, "a4", 60880, 761, 752),
+    ],
+  };
+}
+
+/* ---- Sesión / multi-cliente ------------------------------- */
+export function getToken() {
+  if (DEMO) return localStorage.getItem(D_SESSION) ? "demo" : null;
+  return token;
+}
+export function getSession() {
+  if (DEMO) { try { return JSON.parse(localStorage.getItem(D_SESSION)); } catch (e) { return null; } }
+  return token ? (profile || { name: "", email: "" }) : null;
+}
 
 export async function register({ email, password, name }) {
+  if (DEMO) return demoEnter(email, name, true);
   const r = await api("/register", { method: "POST", body: { email, password, name } });
   token = r.token; localStorage.setItem(TOKEN_KEY, token);
   profile = r.user;
@@ -201,6 +251,7 @@ export async function register({ email, password, name }) {
   return r.user;
 }
 export async function login(email, password) {
+  if (DEMO) return demoEnter(email, null, false);
   const r = await api("/login", { method: "POST", body: { email, password } });
   token = r.token; localStorage.setItem(TOKEN_KEY, token);
   profile = r.user;
@@ -208,13 +259,27 @@ export async function login(email, password) {
   return r.user;
 }
 export function logout() {
+  if (DEMO) {
+    localStorage.removeItem(D_SESSION); localStorage.removeItem(D_STATE);
+    token = null; profile = null; state = emptyState(); emit(false);
+    return;
+  }
   token = null; profile = null;
   localStorage.removeItem(TOKEN_KEY);
   state = emptyState();
   emit(false);
 }
-// Restaura sesión al abrir la app (si hay token guardado).
+// Restaura sesión al abrir la app
 export async function bootstrap() {
+  if (DEMO) {
+    const sess = getSession();
+    if (!sess) return null;
+    token = "demo"; profile = sess;
+    try { state = { ...emptyState(), ...JSON.parse(localStorage.getItem(D_STATE)) }; }
+    catch (e) { state = seedDemoState(); }
+    emit(false);
+    return sess;
+  }
   if (!token) return null;
   const me = await api("/me");
   profile = me;
@@ -227,15 +292,35 @@ async function loadState() {
   emit(false);
 }
 
-/* ---- Perfil del usuario (backend) ------------------------- */
+// Crea/entra a una cuenta demo local
+function demoEnter(email, name, isNew) {
+  const clean = (email || "demo@cuadre.com").trim();
+  const existing = localStorage.getItem(D_STATE);
+  const sess = { email: clean, name: (name || clean.split("@")[0]).trim(), business: "", phone: "" };
+  localStorage.setItem(D_SESSION, JSON.stringify(sess));
+  token = "demo"; profile = sess;
+  state = (isNew || !existing) ? seedDemoState() : { ...emptyState(), ...JSON.parse(existing) };
+  localStorage.setItem(D_STATE, JSON.stringify(state));
+  emit(false);
+  return sess;
+}
+
+/* ---- Perfil del usuario ----------------------------------- */
 export function getProfile() { return profile; }
 export async function saveProfile(patch) {
+  if (DEMO) {
+    profile = { ...(profile || {}), ...patch };
+    localStorage.setItem(D_SESSION, JSON.stringify(profile));
+    emit(false);
+    return profile;
+  }
   const u = await api("/profile", { method: "PUT", body: patch });
   profile = u;
   emit(false);
   return u;
 }
 export async function changePassword(current, next) {
+  if (DEMO) return true; // sin backend, sólo demostración
   await api("/password", { method: "PUT", body: { current, next } });
   return true;
 }
