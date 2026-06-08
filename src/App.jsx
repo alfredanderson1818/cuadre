@@ -676,28 +676,35 @@ function OpSheet({ s, onClose }) {
 
   const inAcc = accountById(s, inId);
   const outAcc = accountById(s, outId);
+  const inCur = inAcc?.currency;
+  const outCur = outAcc?.currency;
+  // divisa ↔ divisa (USDT/Zelle/efectivo): no entra el bolívar, la ganancia es comisión en $
+  const cross = inCur && outCur && inCur !== "BS" && outCur !== "BS";
 
-  // calcula la pierna USD, el monto de salida y la ganancia
   const calc = useMemo(() => {
     const amt = parseFloat(inAmt) || 0;
+    if (cross) {
+      const p = parseFloat(pct) || 0;
+      const outAmt = amt * (1 - p / 100);            // entregas menos tu comisión
+      const profitUSD = amt - outAmt;                 // ganancia en divisa
+      const profitBs = +(profitUSD * (s.rate || 0)).toFixed(2); // equiv. en Bs (reportes)
+      return { usd: amt, outAmt: +outAmt.toFixed(2), profitUSD: +profitUSD.toFixed(2), profitBs, outCur, pct: p, cross: true };
+    }
     const r = parseFloat(rate) || 0;
     const cr = parseFloat(costRate) || r;
-    const inCur = inAcc?.currency;
-    const outCur = outAcc?.currency;
     let usd, outAmt;
     if (inCur === "BS") { usd = r ? amt / r : 0; outAmt = usd; }   // recibo Bs → entrego divisa
     else { usd = amt; outAmt = amt * r; }                          // recibo divisa → entrego Bs
-    if (outCur !== "BS" && inCur !== "BS") outAmt = amt;           // divisa ↔ divisa 1:1
     const profitBs = +((r - cr) * usd).toFixed(2);
     const pctReal = cr ? +(((r / cr) - 1) * 100).toFixed(2) : 0;
-    return { usd, outAmt: +outAmt.toFixed(2), profitBs, outCur, pct: pctReal };
-  }, [inAmt, rate, costRate, inAcc, outAcc]);
+    return { usd, outAmt: +outAmt.toFixed(2), profitBs, outCur, pct: pctReal, cross: false };
+  }, [inAmt, rate, costRate, pct, cross, inCur, outCur, s.rate]);
 
-  const valid = clientId && inId && outId && inId !== outId && parseFloat(inAmt) > 0 && parseFloat(rate) > 0;
+  const valid = clientId && inId && outId && inId !== outId && parseFloat(inAmt) > 0 && (cross || parseFloat(rate) > 0);
 
   function save() {
     if (!valid) return;
-    addOp({ clientId, inId, inAmt, outId, outAmt: calc.outAmt, rate, costRate });
+    addOp({ clientId, inId, inAmt, outId, outAmt: calc.outAmt, rate, costRate, profitBs: calc.profitBs, pct: calc.pct, cross });
     onClose();
   }
 
@@ -740,24 +747,37 @@ function OpSheet({ s, onClose }) {
         </div>
       </div>
 
-      <div className="field-row">
+      {cross ? (
         <div className="field">
-          <label>Tasa costo / base (Bs/$)</label>
-          <input className="input" inputMode="decimal" value={costRate} onChange={(e) => onCost(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>% ganancia</label>
+          <label>% comisión (tu ganancia en {inCur === "USDT" ? "USDT" : "$"})</label>
           <div className="input-money">
             <span className="pfx" style={{ left: "auto", right: 15 }}>%</span>
             <input className="input" inputMode="text" placeholder="0" value={pct}
-              onChange={(e) => onPct(e.target.value)} style={{ paddingLeft: 15, paddingRight: 34 }} />
+              onChange={(e) => setPct(e.target.value)} style={{ paddingLeft: 15, paddingRight: 34 }} />
           </div>
         </div>
-      </div>
-      <div className="field">
-        <label>Tasa al cliente (Bs/$)</label>
-        <input className="input" inputMode="decimal" value={rate} onChange={(e) => onRate(e.target.value)} />
-      </div>
+      ) : (
+        <>
+          <div className="field-row">
+            <div className="field">
+              <label>Tasa costo / base (Bs/$)</label>
+              <input className="input" inputMode="decimal" value={costRate} onChange={(e) => onCost(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>% ganancia</label>
+              <div className="input-money">
+                <span className="pfx" style={{ left: "auto", right: 15 }}>%</span>
+                <input className="input" inputMode="text" placeholder="0" value={pct}
+                  onChange={(e) => onPct(e.target.value)} style={{ paddingLeft: 15, paddingRight: 34 }} />
+              </div>
+            </div>
+          </div>
+          <div className="field">
+            <label>Tasa al cliente (Bs/$)</label>
+            <input className="input" inputMode="decimal" value={rate} onChange={(e) => onRate(e.target.value)} />
+          </div>
+        </>
+      )}
 
       <div className="field">
         <label>Entrego desde (sale de mi inventario)</label>
@@ -768,25 +788,37 @@ function OpSheet({ s, onClose }) {
 
       <div className="calc">
         <div className="calc-row">
-          <span className="k">Equivalente en divisa</span>
-          <span className="v">${fmt(calc.usd)}</span>
+          <span className="k">{cross ? "Recibes" : "Equivalente en divisa"}</span>
+          <span className="v">{cross ? fmtCur(calc.usd, inCur) : `$${fmt(calc.usd)}`}</span>
         </div>
         <div className="calc-row">
           <span className="k">Entregas al cliente</span>
           <span className="v down">{fmtCur(calc.outAmt, calc.outCur)}</span>
         </div>
         <div className="calc-row">
-          <span className="k">% de ganancia</span>
+          <span className="k">{cross ? "% comisión" : "% de ganancia"}</span>
           <span className="v" style={{ color: calc.pct < 0 ? "var(--coral)" : "var(--green)" }}>
             {calc.pct > 0 ? "+" : ""}{fmt(calc.pct, 2)}%
           </span>
         </div>
         <div className="calc-row big">
           <span className="k">Tu ganancia</span>
-          <span className="v" style={calc.profitBs < 0 ? { color: "var(--coral)" } : {}}>
-            {calc.profitBs >= 0 ? "+" : ""}{fmt(calc.profitBs)} Bs
-          </span>
+          {cross ? (
+            <span className="v" style={calc.profitUSD < 0 ? { color: "var(--coral)" } : {}}>
+              {calc.profitUSD >= 0 ? "+" : ""}{fmtCur(calc.profitUSD, inCur)}
+            </span>
+          ) : (
+            <span className="v" style={calc.profitBs < 0 ? { color: "var(--coral)" } : {}}>
+              {calc.profitBs >= 0 ? "+" : ""}{fmt(calc.profitBs)} Bs
+            </span>
+          )}
         </div>
+        {cross && (
+          <div className="calc-row" style={{ paddingTop: 0 }}>
+            <span className="k" style={{ fontSize: 11 }}>≈ en bolívares</span>
+            <span className="v" style={{ fontSize: 13, color: "var(--txt-soft)" }}>{fmt(calc.profitBs)} Bs</span>
+          </div>
+        )}
       </div>
 
       {inId === outId && <p style={{ color: "var(--coral)", fontSize: 12, marginBottom: 12 }}>El canal que recibes y el que entregas deben ser distintos.</p>}
@@ -918,12 +950,27 @@ function OpDetailSheet({ op, s, onClose }) {
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
-        <DtRow k="Equivalente en divisa" v={`$${fmt(usd)}`} />
-        <DtRow k="Tasa al cliente" v={`${fmt(op.rate, 2)} Bs/$`} />
-        <DtRow k="Tasa de costo / base" v={`${fmt(op.costRate, 2)} Bs/$`} />
-        <DtRow k="% de ganancia" v={`${pctOp > 0 ? "+" : ""}${fmt(pctOp, 2)}%`} accent={pctOp >= 0} coral={pctOp < 0} />
-        <DtRow k="Tu ganancia" v={`${op.profitBs >= 0 ? "+" : ""}${fmt(op.profitBs)} Bs`} accent={op.profitBs >= 0} coral={op.profitBs < 0} />
-        <DtRow k="≈ ganancia en USD" v={`${op.profitBs >= 0 ? "+" : ""}${fmtUSD(op.profitBs / op.rate)}`} />
+        {op.cross ? (() => {
+          const profitUSD = +(op.inAmt - op.outAmt).toFixed(2);
+          const cpct = op.pct != null ? op.pct : (op.inAmt ? (profitUSD / op.inAmt) * 100 : 0);
+          return (
+            <>
+              <DtRow k="Tipo" v={`Cambio divisa ↔ divisa`} />
+              <DtRow k="% comisión" v={`${cpct > 0 ? "+" : ""}${fmt(cpct, 2)}%`} accent={cpct >= 0} coral={cpct < 0} />
+              <DtRow k="Tu ganancia" v={`${profitUSD >= 0 ? "+" : ""}${fmtCur(profitUSD, inAcc?.currency)}`} accent={profitUSD >= 0} coral={profitUSD < 0} />
+              <DtRow k="≈ en bolívares" v={`${op.profitBs >= 0 ? "+" : ""}${fmt(op.profitBs)} Bs`} />
+            </>
+          );
+        })() : (
+          <>
+            <DtRow k="Equivalente en divisa" v={`$${fmt(usd)}`} />
+            <DtRow k="Tasa al cliente" v={`${fmt(op.rate, 2)} Bs/$`} />
+            <DtRow k="Tasa de costo / base" v={`${fmt(op.costRate, 2)} Bs/$`} />
+            <DtRow k="% de ganancia" v={`${pctOp > 0 ? "+" : ""}${fmt(pctOp, 2)}%`} accent={pctOp >= 0} coral={pctOp < 0} />
+            <DtRow k="Tu ganancia" v={`${op.profitBs >= 0 ? "+" : ""}${fmt(op.profitBs)} Bs`} accent={op.profitBs >= 0} coral={op.profitBs < 0} />
+            <DtRow k="≈ ganancia en USD" v={`${op.profitBs >= 0 ? "+" : ""}${fmtUSD(op.profitBs / op.rate)}`} />
+          </>
+        )}
       </div>
 
       <p className="dt-note">El comprobante que compartes con el cliente <b>no incluye</b> tu ganancia ni la tasa de costo.</p>

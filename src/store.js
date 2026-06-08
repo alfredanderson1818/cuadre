@@ -98,15 +98,19 @@ export async function fetchLiveRates() {
   }
 }
 
-export function addOp({ clientId, inId, inAmt, outId, outAmt, rate, costRate }) {
+export function addOp({ clientId, inId, inAmt, outId, outAmt, rate, costRate, profitBs, pct, cross }) {
   const usd = +inAmt;
-  const profitBs = +(((+rate) - (+costRate || +rate)) * usd).toFixed(2);
+  const computedProfit = profitBs != null
+    ? +(+profitBs).toFixed(2)
+    : +(((+rate) - (+costRate || +rate)) * usd).toFixed(2);
   const newOp = {
     id: "o" + (state.ops.length + 1) + "_" + state.ops.length,
     ts: nowOrSeq(),
     date: new Date().toISOString(),
     clientId, inId, inAmt: +inAmt, outId, outAmt: +outAmt,
-    rate: +rate, costRate: +costRate || +rate, profitBs,
+    rate: +rate, costRate: +costRate || +rate, profitBs: computedProfit,
+    pct: pct != null && pct !== "" ? +pct : undefined,
+    cross: !!cross,
   };
   const accounts = state.accounts.map((a) => {
     if (a.id === inId) return { ...a, balance: +(a.balance + (+inAmt)).toFixed(2) };
