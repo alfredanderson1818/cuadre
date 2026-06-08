@@ -4,6 +4,7 @@ import {
   accountById, clientById, totalUSD, balanceByKind, profitTotalBs, profitByDay,
   fmt, fmtUSD, fmtBs, fmtCur, relTime, toUSD,
   getToken, getSession, login, register, logout, bootstrap, getProfile, saveProfile, fetchLiveRates,
+  getAccess, refreshAccess, loginWithGoogle, opsToCSV, fullBackupJSON, filterOpsByRange,
 } from "./store";
 import { sendWhatsApp, downloadPDF } from "./receipt";
 
@@ -48,7 +49,7 @@ function Icon({ d, ...p }) {
 
 /* ============================== APP =============================== */
 export default function App() {
-  const [session, setSession] = useState(() => (getToken() ? "loading" : null));
+  const [session, setSession] = useState("loading");
   const [tab, setTab] = useState("home");
   const [sheet, setSheet] = useState(null); // 'op' | 'client' | 'rate' | 'account' | 'profile' | null
   const [detailId, setDetailId] = useState(null);
@@ -56,20 +57,21 @@ export default function App() {
   const [clientDetailId, setClientDetailId] = useState(null);
   const s = useStore();
 
-  // Restaura sesión guardada al abrir
+  // Restaura sesión guardada al abrir (y al reintentar acceso)
   useEffect(() => {
     if (session === "loading") {
       bootstrap().then((u) => setSession(u || null)).catch(() => { logout(); setSession(null); });
     }
-  }, []);
+  }, [session]);
 
   // Trae tasas en vivo una vez con sesión activa
   useEffect(() => { if (session && session !== "loading") fetchLiveRates(); }, [session && session !== "loading"]);
 
+  async function doLogout() { await logout(); setSession(null); }
+
   if (session === "loading") return <Splash />;
   if (!session) return <Login onLogin={setSession} />;
-
-  function doLogout() { logout(); setSession(null); }
+  if (!getAccess()?.active) return <Pending session={session} onLogout={doLogout} onRetry={() => setSession("loading")} />;
   const detailOp = detailId ? s.ops.find((o) => o.id === detailId) : null;
 
   return (
@@ -79,7 +81,7 @@ export default function App() {
         {tab === "ops" && <Ops s={s} openDetail={setDetailId} />}
         {tab === "wallets" && <Wallets s={s} openSheet={setSheet} />}
         {tab === "clients" && <Clients s={s} openSheet={setSheet} openClient={setClientDetailId} />}
-        {tab === "reports" && <Reports s={s} openGroup={setGroup} />}
+        {tab === "reports" && <Reports s={s} openGroup={setGroup} openExport={() => setSheet("export")} />}
       </main>
 
       <Nav tab={tab} setTab={setTab} onAdd={() => setSheet("op")} />
@@ -88,6 +90,7 @@ export default function App() {
       {sheet === "client" && <ClientSheet onClose={() => setSheet(null)} />}
       {sheet === "rate" && <RateSheet s={s} onClose={() => setSheet(null)} />}
       {sheet === "account" && <AccountSheet onClose={() => setSheet(null)} />}
+      {sheet === "export" && <ExportSheet s={s} onClose={() => setSheet(null)} />}
       {sheet === "profile" && <ProfileSheet session={session} onClose={() => setSheet(null)} onLogout={doLogout} />}
       {group && <GroupSheet group={group} s={s} onClose={() => setGroup(null)} openDetail={(id) => { setGroup(null); setDetailId(id); }} />}
       {clientDetailId && <ClientDetailSheet client={s.clients.find((c) => c.id === clientDetailId)} s={s} onClose={() => setClientDetailId(null)} openDetail={(id) => { setClientDetailId(null); setDetailId(id); }} />}
@@ -174,6 +177,33 @@ function Splash() {
   );
 }
 
+/* ============================== PENDING (sin pago) ============================== */
+function Pending({ session, onLogout, onRetry }) {
+  return (
+    <div className="shell auth">
+      <div className="auth-glow" />
+      <div className="auth-card stagger" style={{ textAlign: "center" }}>
+        <div className="auth-brand" style={{ justifyContent: "center" }}>
+          <BrandMark size={44} />
+          <div className="brand-name">Cua<b>dre</b></div>
+        </div>
+        <div style={{ fontSize: 40, margin: "8px 0" }}>⏳</div>
+        <h1 className="auth-title">Cuenta pendiente</h1>
+        <p className="auth-lead" style={{ marginBottom: 18 }}>
+          Tu cuenta aún no está activada. Para usar Cuadre, contacta a tu proveedor y realiza el pago de tu plan.
+        </p>
+        <div className="pend-box">
+          <div className="pend-k">Tu correo</div>
+          <div className="pend-v">{session?.email || "—"}</div>
+        </div>
+        <button className="btn btn-primary" onClick={onRetry} style={{ marginTop: 16 }}>Ya activé mi cuenta · Reintentar</button>
+        <button className="btn btn-ghost" onClick={onLogout} style={{ marginTop: 10 }}>Cerrar sesión</button>
+      </div>
+      <div className="auth-badge">Maben Software Development · 2018</div>
+    </div>
+  );
+}
+
 /* ============================== LOGIN ============================== */
 function Login({ onLogin }) {
   const [mode, setMode] = useState("login"); // 'login' | 'register'
@@ -235,6 +265,11 @@ function Login({ onLogin }) {
           {busy ? "Un momento…" : isReg ? "Crear cuenta" : "Iniciar sesión"}
         </button>
 
+        <div className="auth-or"><span>o</span></div>
+        <button type="button" className="btn-google" onClick={async () => { try { await loginWithGoogle(); } catch (e) { setErr(e.message); } }}>
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.4 0 10.3-2.1 14-5.5l-6.5-5.3C29.6 34.6 26.9 35.5 24 35.5c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.6 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4.1 5.4l6.5 5.3C41.4 35.7 44 30.3 44 24c0-1.3-.1-2.3-.4-3.5z"/></svg>
+          Continuar con Google
+        </button>
         {!isReg && (
           <button type="button" className="auth-quick" onClick={() => { setEmail("admin"); setPass("admin"); }}>
             Probar con <b>admin / admin</b>
@@ -514,7 +549,7 @@ function Clients({ s, openSheet, openClient }) {
 }
 
 /* ============================== REPORTS ============================== */
-function Reports({ s, openGroup }) {
+function Reports({ s, openGroup, openExport }) {
   const days = profitByDay(s, 7);
   const max = Math.max(...days, 1);
   const totalBs = profitTotalBs(s);
@@ -534,7 +569,8 @@ function Reports({ s, openGroup }) {
       <div className="eyebrow">Resultados</div>
       <h1 className="screen-title">Tu <span className="accent">ganancia</span></h1>
       <p className="screen-lead">El negocio vive del spread. Aquí lo ves claro.</p>
-      <div style={{ height: 18 }} />
+      <div style={{ height: 14 }} />
+      <button className="btn btn-ghost" onClick={openExport} style={{ marginBottom: 16 }}>⬇ Exportar / descargar datos</button>
 
       <div className="hero" style={{ marginBottom: 14 }}>
         <div className="hero-label">Ganancia acumulada</div>
@@ -1075,6 +1111,51 @@ function ProfileSheet({ session, onClose, onLogout }) {
 
       <div className="divider" />
       <button className="btn btn-coral" onClick={() => { if (confirm("¿Cerrar sesión?")) onLogout(); }}>Cerrar sesión</button>
+    </Sheet>
+  );
+}
+
+/* ============================== EXPORT SHEET ============================== */
+function downloadFile(filename, content, type = "text/csv;charset=utf-8") {
+  const blob = new Blob(["﻿" + content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+function ExportSheet({ s, onClose }) {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const ranges = [
+    { id: "day", label: "Hoy", icon: "📅" },
+    { id: "month", label: "Este mes", icon: "🗓️" },
+    { id: "year", label: "Este año", icon: "📆" },
+    { id: "all", label: "Todo el historial", icon: "📚" },
+  ];
+  function exportCSV(range, label) {
+    const n = filterOpsByRange(s, range).length;
+    if (n === 0) { alert("No hay operaciones en ese período."); return; }
+    downloadFile(`cuadre-${range}-${stamp}.csv`, opsToCSV(s, range));
+  }
+  return (
+    <Sheet onClose={onClose} title="Exportar datos" lead="Descarga tus operaciones en Excel/CSV o un respaldo completo.">
+      {ranges.map((r) => {
+        const n = filterOpsByRange(s, r.id).length;
+        return (
+          <button key={r.id} className="export-row" onClick={() => exportCSV(r.id, r.label)}>
+            <span className="export-ic">{r.icon}</span>
+            <span className="export-main">
+              <span className="export-title">{r.label}</span>
+              <span className="export-sub">{n} {n === 1 ? "operación" : "operaciones"} · CSV</span>
+            </span>
+            <span className="export-dl">⬇</span>
+          </button>
+        );
+      })}
+      <div className="divider" />
+      <button className="btn btn-ghost" onClick={() => downloadFile(`cuadre-respaldo-${stamp}.json`, fullBackupJSON(s), "application/json")}>
+        🗄️ Respaldo completo (JSON)
+      </button>
+      <p className="dt-note" style={{ marginTop: 14 }}>El CSV se abre en Excel o Google Sheets. El respaldo JSON guarda todo (cuentas, clientes, operaciones y tasas).</p>
     </Sheet>
   );
 }

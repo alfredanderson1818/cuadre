@@ -2,6 +2,7 @@
    CUADRE — capa de datos (estado en la nube por usuario, vía backend)
    ============================================================ */
 import { useSyncExternalStore } from "react";
+import { supabase } from "./supabase";
 
 /* ---- Metadatos de canales --------------------------------- */
 export const CHANNELS = {
@@ -13,38 +14,18 @@ export const CHANNELS = {
 
 const baseTime = 1749330000000; // referencia para ordenar/relativizar tiempos
 
-/* ---- Modo demo (GitHub Pages, sin backend) ---------------- */
-// En github.io no hay servidor: la app guarda todo en el navegador.
-// En local (u otro host con backend) usa la API real.
-export const DEMO = typeof location !== "undefined" &&
-  (location.hostname.endsWith("github.io") || location.search.includes("demo=1") || import.meta.env.VITE_DEMO === "1");
-const D_SESSION = "cuadre.demo.session";
-const D_STATE = "cuadre.demo.state";
-
-/* ---- Cliente del backend ---------------------------------- */
-const API = "/api";
-const TOKEN_KEY = "cuadre.token";
-let token = localStorage.getItem(TOKEN_KEY) || null;
-let profile = null;
+/* ---- Sesión: "supa" (Supabase) o "local" (admin/admin) ---- */
+const D_SESSION = "cuadre.local.session"; // sólo para el modo admin local
+const D_STATE = "cuadre.local.state";
+let token = null;        // "supa" | "local" | null
+let supaUser = null;     // usuario de Supabase
+let profile = null;      // { email, name, business, phone }
+let access = null;       // { active, plan, paid_until } — control de acceso (pago)
 
 function emptyState() {
   return { rate: 0, rates: { bcv: null, euro: null, binance: null, updatedAt: null }, accounts: [], clients: [], ops: [] };
 }
 let state = emptyState();
-
-async function api(path, opts = {}) {
-  const res = await fetch(API + path, {
-    method: opts.method || "GET",
-    headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  if (!res.ok) {
-    let msg = "Error de conexión con el servidor";
-    try { msg = (await res.json()).error || msg; } catch (e) { /* ignore */ }
-    throw new Error(msg);
-  }
-  return res.json();
-}
 
 /* ---- Estado reactivo + guardado en la nube ---------------- */
 const listeners = new Set();
@@ -52,12 +33,18 @@ let saveTimer = null;
 function emit(persist = true) {
   listeners.forEach((l) => l());
   if (!persist || !token) return;
-  if (DEMO || token === "local") {
+  if (token === "local") {
     localStorage.setItem(D_STATE, JSON.stringify(state));
     return;
   }
+  // Supabase: guarda el blob del usuario (debounced)
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { api("/state", { method: "PUT", body: { state } }).catch(() => {}); }, 450);
+  saveTimer = setTimeout(() => {
+    if (!supaUser) return;
+    supabase.from("app_state")
+      .upsert({ user_id: supaUser.id, data: state, updated_at: new Date().toISOString() })
+      .then(() => {}, () => {});
+  }, 600);
 }
 function subscribe(l) { listeners.add(l); return () => listeners.delete(l); }
 function snapshot() { return state; }
@@ -210,7 +197,25 @@ export function relTime(ts, s) {
   return `hace ${d} d`;
 }
 
-/* ---- Estado demo inicial (solo modo Pages) ---------------- */
+/* ---- Estado inicial para una cuenta nueva (real) ---------- */
+// Cuentas base en cero (listas para usar); sin clientes ni operaciones.
+function seedFresh() {
+  return {
+    rate: 0,
+    rates: { bcv: null, euro: null, binance: null, updatedAt: null },
+    accounts: [
+      { id: "a1", kind: "cash", name: "Efectivo $", currency: "USD", balance: 0 },
+      { id: "a2", kind: "usdt", name: "Binance USDT", currency: "USDT", balance: 0 },
+      { id: "a3", kind: "zelle", name: "Zelle", currency: "USD", balance: 0 },
+      { id: "a4", kind: "bs", name: "Banco de Venezuela", currency: "BS", balance: 0 },
+    ],
+    clients: [],
+    ops: [],
+    profile: { name: "", business: "", phone: "" },
+  };
+}
+
+/* ---- Estado demo (modo admin/admin local) ----------------- */
 function seedDemoState() {
   const mk = (id, clientId, inId, inAmt, outId, outAmt, rate, costRate) => ({
     id, ts: baseTime, date: new Date().toISOString(),
@@ -240,10 +245,20 @@ function seedDemoState() {
   };
 }
 
-/* ---- Sesión / multi-cliente ------------------------------- */
-// Acceso rápido temporal (mientras montamos Firebase)
+/* ---- Sesión / multi-cliente (Supabase + admin local) ------ */
 function isAdmin(email, password) {
   return (email || "").trim().toLowerCase() === "admin" && (password || "") === "admin";
+}
+// Traduce errores comunes de Supabase al español
+function traduce(msg) {
+  const m = (msg || "").toLowerCase();
+  if (m.includes("invalid login")) return "Correo o contraseña incorrectos";
+  if (m.includes("already registered") || m.includes("already been registered")) return "Ese correo ya está registrado";
+  if (m.includes("email not confirmed")) return "Confirma tu correo antes de entrar (revisa tu bandeja)";
+  if (m.includes("password should be")) return "La contraseña debe tener al menos 6 caracteres";
+  if (m.includes("unable to validate email")) return "Correo inválido";
+  if (m.includes("fetch")) return "Sin conexión. Revisa tu internet.";
+  return msg || "Ocurrió un error";
 }
 
 export function getToken() {
@@ -256,57 +271,151 @@ export function getSession() {
 }
 
 export async function register({ email, password, name }) {
-  if (DEMO || isAdmin(email, password)) return localEnter(email, name, true);
-  const r = await api("/register", { method: "POST", body: { email, password, name } });
-  token = r.token; localStorage.setItem(TOKEN_KEY, token);
-  profile = r.user;
-  await loadState();
-  return r.user;
+  if (isAdmin(email, password)) return localEnter("admin@cuadre.com", "Admin");
+  const { data, error } = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { name } } });
+  if (error) throw new Error(traduce(error.message));
+  if (!data.session) {
+    // Confirmación de correo activada: aún no hay sesión
+    throw new Error("Te enviamos un correo para confirmar tu cuenta. Confírmalo y luego inicia sesión.");
+  }
+  supaUser = data.user; token = "supa";
+  state = { ...seedFresh(), profile: { name: name || "", business: "", phone: "" } };
+  await supabase.from("app_state").upsert({ user_id: supaUser.id, data: state });
+  setProfileFromState();
+  emit(false);
+  return profile;
 }
+
 export async function login(email, password) {
-  if (isAdmin(email, password)) return localEnter("admin@cuadre.com", "Admin", false);
-  if (DEMO) return localEnter(email, null, false);
-  const r = await api("/login", { method: "POST", body: { email, password } });
-  token = r.token; localStorage.setItem(TOKEN_KEY, token);
-  profile = r.user;
-  await loadState();
-  return r.user;
+  if (isAdmin(email, password)) return localEnter("admin@cuadre.com", "Admin");
+  const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+  if (error) throw new Error(traduce(error.message));
+  supaUser = data.user; token = "supa";
+  await loadSupaState();
+  return profile;
 }
-export function logout() {
-  localStorage.removeItem(D_SESSION); localStorage.removeItem(D_STATE); localStorage.removeItem(TOKEN_KEY);
-  token = null; profile = null; state = emptyState(); emit(false);
+
+export async function logout() {
+  if (token === "supa") { try { await supabase.auth.signOut(); } catch (e) { /* ignore */ } }
+  localStorage.removeItem(D_SESSION); localStorage.removeItem(D_STATE);
+  token = null; profile = null; supaUser = null; access = null; state = emptyState();
+  emit(false);
 }
+
 // Restaura sesión al abrir la app
 export async function bootstrap() {
-  // sesión local (admin / demo) tiene prioridad
+  // 1) sesión local (admin) tiene prioridad
   const ds = localStorage.getItem(D_SESSION);
-  if (ds && (!token || token === "local")) {
+  if (ds) {
     token = "local"; profile = JSON.parse(ds);
     try { state = { ...emptyState(), ...JSON.parse(localStorage.getItem(D_STATE)) }; }
     catch (e) { state = seedDemoState(); localStorage.setItem(D_STATE, JSON.stringify(state)); }
     emit(false);
     return profile;
   }
-  if (!token) return null;
-  const me = await api("/me");
-  profile = me;
-  await loadState();
-  return me;
+  // 2) sesión de Supabase
+  const { data } = await supabase.auth.getSession();
+  if (data.session) {
+    supaUser = data.session.user; token = "supa";
+    await loadSupaState();
+    return profile;
+  }
+  return null;
 }
-async function loadState() {
-  const data = await api("/state");
-  state = { ...emptyState(), ...data };
+
+// Carga (o inicializa) el estado del usuario desde Supabase
+async function loadSupaState() {
+  const { data: row } = await supabase.from("app_state").select("data").eq("user_id", supaUser.id).maybeSingle();
+  if (row && row.data && Object.keys(row.data).length) {
+    state = { ...emptyState(), ...row.data };
+  } else {
+    const meta = supaUser.user_metadata || {};
+    state = { ...seedFresh(), profile: { name: meta.name || "", business: "", phone: "" } };
+    await supabase.from("app_state").upsert({ user_id: supaUser.id, data: state });
+  }
+  setProfileFromState();
+  await refreshAccess();
   emit(false);
 }
 
-// Crea/entra a una sesión local (admin o demo), guardada en el navegador
-function localEnter(email, name, isNew) {
-  const clean = (email || "demo@cuadre.com").trim();
+// Consulta el estado de acceso (pago) del usuario. Fail-open si la tabla no existe aún.
+export async function refreshAccess() {
+  if (token !== "supa" || !supaUser) { access = { active: true }; return access; }
+  const { data, error } = await supabase.from("access")
+    .select("active,plan,paid_until").eq("user_id", supaUser.id).maybeSingle();
+  if (error) { access = { active: true, _nogate: true }; } // tabla no creada aún → no bloquear
+  else access = data || { active: false };
+  return access;
+}
+export function getAccess() {
+  if (token === "local") return { active: true };
+  return access || { active: false };
+}
+
+function setProfileFromState() {
+  const p = state.profile || {};
+  const meta = supaUser?.user_metadata || {};
+  profile = {
+    email: supaUser?.email || "",
+    name: p.name || meta.name || meta.full_name || (supaUser?.email || "").split("@")[0],
+    business: p.business || "",
+    phone: p.phone || "",
+  };
+}
+
+/* ---- Inicio con Google (OAuth) ---------------------------- */
+export async function loginWithGoogle() {
+  const redirectTo = window.location.origin + window.location.pathname;
+  const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo } });
+  if (error) throw new Error(traduce(error.message));
+}
+
+/* ---- Exportar datos (CSV por período) --------------------- */
+export function filterOpsByRange(s, range) {
+  if (range === "all") return s.ops.slice();
+  const now = new Date();
+  return s.ops.filter((o) => {
+    const d = o.date ? new Date(o.date) : null;
+    if (!d) return range === "all";
+    if (range === "day") return d.toDateString() === now.toDateString();
+    if (range === "month") return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    if (range === "year") return d.getFullYear() === now.getFullYear();
+    return true;
+  });
+}
+
+export function opsToCSV(s, range) {
+  const ops = filterOpsByRange(s, range);
+  const head = ["Fecha", "Cliente", "Tipo", "Recibí", "Canal entra", "Entregué", "Canal sale", "Tasa", "%", "Ganancia Bs", "Ganancia USD"];
+  const rows = ops.map((o) => {
+    const cli = clientById(s, o.clientId);
+    const inA = accountById(s, o.inId);
+    const outA = accountById(s, o.outId);
+    const fecha = o.date ? new Date(o.date).toLocaleString("es-VE") : "";
+    const pct = o.pct != null ? o.pct : (o.costRate ? ((o.rate / o.costRate) - 1) * 100 : 0);
+    const gUSD = o.cross ? (o.inAmt - o.outAmt) : (o.rate ? o.profitBs / o.rate : 0);
+    return [
+      fecha, cli?.name || "", o.cross ? "divisa-divisa" : "con bolívares",
+      o.inAmt, inA?.name || "", o.outAmt, outA?.name || "",
+      o.cross ? "" : o.rate, (+pct).toFixed(2), o.profitBs, (+gUSD).toFixed(2),
+    ];
+  });
+  const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
+  return [head, ...rows].map((r) => r.map(esc).join(",")).join("\n");
+}
+
+// Respaldo completo (JSON) de todo el estado
+export function fullBackupJSON(s) {
+  return JSON.stringify({ exportedAt: new Date().toISOString(), ...s }, null, 2);
+}
+
+// Crea/entra a la sesión local de prueba (admin/admin)
+function localEnter(email, name) {
   const existing = localStorage.getItem(D_STATE);
-  const sess = { email: clean, name: (name || clean.split("@")[0]).trim(), business: "", phone: "" };
+  const sess = { email, name, business: "", phone: "" };
   localStorage.setItem(D_SESSION, JSON.stringify(sess));
   token = "local"; profile = sess;
-  state = (isNew || !existing) ? seedDemoState() : { ...emptyState(), ...JSON.parse(existing) };
+  state = existing ? { ...emptyState(), ...JSON.parse(existing) } : seedDemoState();
   localStorage.setItem(D_STATE, JSON.stringify(state));
   emit(false);
   return sess;
@@ -315,19 +424,20 @@ function localEnter(email, name, isNew) {
 /* ---- Perfil del usuario ----------------------------------- */
 export function getProfile() { return profile; }
 export async function saveProfile(patch) {
-  if (DEMO) {
-    profile = { ...(profile || {}), ...patch };
+  profile = { ...(profile || {}), ...patch };
+  if (token === "local") {
     localStorage.setItem(D_SESSION, JSON.stringify(profile));
     emit(false);
-    return profile;
+  } else {
+    // guarda los campos de perfil dentro del blob del usuario
+    state = { ...state, profile: { name: profile.name, business: profile.business, phone: profile.phone } };
+    emit(true);
   }
-  const u = await api("/profile", { method: "PUT", body: patch });
-  profile = u;
-  emit(false);
-  return u;
+  return profile;
 }
 export async function changePassword(current, next) {
-  if (DEMO) return true; // sin backend, sólo demostración
-  await api("/password", { method: "PUT", body: { current, next } });
+  if (token === "local") return true;
+  const { error } = await supabase.auth.updateUser({ password: next });
+  if (error) throw new Error(traduce(error.message));
   return true;
 }
