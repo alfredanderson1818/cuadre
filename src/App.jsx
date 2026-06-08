@@ -776,6 +776,13 @@ function OpSheet({ s, onClose }) {
       </div>
 
       <div className="field">
+        <label>Entrego desde (sale de mi inventario)</label>
+        <select className="select" value={outId} onChange={(e) => setOutId(e.target.value)}>
+          {s.accounts.map((a) => <option key={a.id} value={a.id}>{CHANNELS[a.kind].icon} {a.name} · {fmtCur(a.balance, a.currency)}</option>)}
+        </select>
+      </div>
+
+      <div className="field">
         <label>Monto recibido ({inAcc?.currency === "BS" ? "Bs" : inAcc?.currency === "USDT" ? "USDT" : "USD"})</label>
         <div className="input-money">
           <span className="pfx">{inAcc?.currency === "BS" ? "Bs" : inAcc?.currency === "USDT" ? "₮" : "$"}</span>
@@ -814,13 +821,6 @@ function OpSheet({ s, onClose }) {
           </div>
         </>
       )}
-
-      <div className="field">
-        <label>Entrego desde (sale de mi inventario)</label>
-        <select className="select" value={outId} onChange={(e) => setOutId(e.target.value)}>
-          {s.accounts.map((a) => <option key={a.id} value={a.id}>{CHANNELS[a.kind].icon} {a.name} · {fmtCur(a.balance, a.currency)}</option>)}
-        </select>
-      </div>
 
       <div className="calc">
         <div className="calc-row">
