@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  CHANNELS, useStore, addOp, addClient, addAccount, setRate,
+  CHANNELS, useStore, addOp, addClient, addAccount, setRate, clearData,
   accountById, clientById, totalUSD, balanceByKind, profitTotalBs, profitByDay,
   fmt, fmtUSD, fmtBs, fmtCur, relTime, toUSD,
   getToken, getSession, login, register, logout, bootstrap, getProfile, saveProfile, fetchLiveRates,
@@ -1064,6 +1064,14 @@ function ProfileSheet({ session, onClose, onLogout }) {
           <button className="btn btn-primary" onClick={changePass}>Actualizar contraseña</button>
         </div>
       )}
+
+      <div className="divider" />
+      <button className="btn btn-ghost" onClick={() => {
+        if (confirm("¿Borrar todas las cuentas, clientes y operaciones? Las tasas de referencia se conservan. Esto no se puede deshacer.")) {
+          clearData();
+          onClose();
+        }
+      }}>🧹 Borrar datos (dejar solo tasas)</button>
 
       <div className="divider" />
       <button className="btn btn-coral" onClick={() => { if (confirm("¿Cerrar sesión?")) onLogout(); }}>Cerrar sesión</button>

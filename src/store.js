@@ -122,6 +122,12 @@ export function addOp({ clientId, inId, inAmt, outId, outAmt, rate, costRate, pr
   return newOp;
 }
 
+// Limpia cuentas, clientes y operaciones; conserva las tasas (referenciales y del día)
+export function clearData() {
+  state = { ...state, accounts: [], clients: [], ops: [] };
+  emit();
+}
+
 export function addClient({ name, phone, note }) {
   const c = { id: "c" + Date.now(), name, phone: phone || "", note: note || "" };
   state = { ...state, clients: [c, ...state.clients] };
