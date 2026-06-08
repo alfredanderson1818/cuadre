@@ -67,8 +67,13 @@ export default function App() {
     }
   }, [session]);
 
-  // Trae tasas en vivo una vez con sesión activa
-  useEffect(() => { if (session && session !== "loading") fetchLiveRates(); }, [session && session !== "loading"]);
+  // Trae tasas en vivo al entrar y las refresca cada minuto
+  useEffect(() => {
+    if (!(session && session !== "loading")) return;
+    fetchLiveRates();
+    const id = setInterval(fetchLiveRates, 60000);
+    return () => clearInterval(id);
+  }, [session && session !== "loading"]);
 
   async function doLogout() { await logout(); setSession(null); }
 

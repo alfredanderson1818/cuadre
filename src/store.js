@@ -60,24 +60,34 @@ export function setRate(rate) {
 }
 
 export function setRates(patch) {
+  // No persiste (emit false): las tasas se re-consultan al abrir y cada minuto.
   state = { ...state, rates: { ...state.rates, ...patch } };
-  emit();
+  emit(false);
 }
 
-// Trae tasas reales de Venezuela (BCV, Euro, Binance/paralelo). Falla en silencio.
+// Trae tasas reales: BCV y Euro (DolarAPI, oficiales) + Binance P2P en vivo (CriptoYa).
 export async function fetchLiveRates() {
   try {
-    const [usd, eur] = await Promise.all([
-      fetch("https://ve.dolarapi.com/v1/dolares").then((r) => r.json()),
-      fetch("https://ve.dolarapi.com/v1/euros").then((r) => r.json()),
+    const [usd, eur, bin] = await Promise.all([
+      fetch("https://ve.dolarapi.com/v1/dolares").then((r) => r.json()).catch(() => null),
+      fetch("https://ve.dolarapi.com/v1/euros").then((r) => r.json()).catch(() => null),
+      fetch("https://criptoya.com/api/binancep2p/usdt/ves/1").then((r) => r.json()).catch(() => null),
     ]);
-    const bcv = usd.find((x) => x.fuente === "oficial")?.promedio;
-    const binance = usd.find((x) => x.fuente === "paralelo")?.promedio;
-    const euro = eur.find((x) => x.fuente === "oficial")?.promedio;
     const patch = { updatedAt: new Date().toISOString() };
-    if (bcv) patch.bcv = +(+bcv).toFixed(2);
-    if (binance) patch.binance = +(+binance).toFixed(2);
-    if (euro) patch.euro = +(+euro).toFixed(2);
+    if (usd) {
+      const bcv = usd.find((x) => x.fuente === "oficial")?.promedio;
+      if (bcv) patch.bcv = +(+bcv).toFixed(2);
+    }
+    if (eur) {
+      const e = eur.find((x) => x.fuente === "oficial")?.promedio;
+      if (e) patch.euro = +(+e).toFixed(2);
+    }
+    // Binance P2P real (promedio compra/venta); si falla, usa paralelo de DolarAPI
+    if (bin && bin.ask && bin.bid) patch.binance = +(((+bin.ask + +bin.bid) / 2)).toFixed(2);
+    else if (usd) {
+      const par = usd.find((x) => x.fuente === "paralelo")?.promedio;
+      if (par) patch.binance = +(+par).toFixed(2);
+    }
     setRates(patch);
     return true;
   } catch (e) {
