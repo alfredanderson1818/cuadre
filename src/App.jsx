@@ -1344,6 +1344,7 @@ function DebtsSheet({ s, onClose }) {
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [concept, setConcept] = useState("");
+  const [openId, setOpenId] = useState(null);
 
   const debts = s.debts || [];
   const pend = debts.filter((d) => !d.paid);
@@ -1357,22 +1358,23 @@ function DebtsSheet({ s, onClose }) {
   }
 
   const Row = (d) => (
-    <div className="row" key={d.id}>
+    <div className="row row-tap" key={d.id} onClick={() => setOpenId(d.id)}>
       <div className="row-ic" style={{ background: d.direction === "they_owe" ? "var(--green-glow)" : "var(--coral-soft)", color: d.direction === "they_owe" ? "var(--green)" : "var(--coral)", opacity: d.paid ? 0.5 : 1 }}>
         {d.direction === "they_owe" ? "↓" : "↑"}
       </div>
       <div className="row-main" style={{ opacity: d.paid ? 0.5 : 1 }}>
         <div className="row-title" style={d.paid ? { textDecoration: "line-through" } : {}}>{d.who}</div>
-        <div className="row-sub">{d.direction === "they_owe" ? "Me debe" : "Le debo"}{d.concept ? ` · ${d.concept}` : ""}</div>
+        <div className="row-sub">{d.direction === "they_owe" ? "Me debe" : "Le debo"}{d.concept ? ` · ${d.concept}` : ""}{d.paid ? " · saldada" : ""}</div>
       </div>
-      <div className="row-amt" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+      <div className="row-amt">
         <div className="a" style={{ color: d.paid ? "var(--txt-mute)" : d.direction === "they_owe" ? "var(--green)" : "var(--coral)" }}>{fmt(d.amount, d.currency === "BS" ? 0 : 2)} {sym(d.currency)}</div>
-        <button className="debt-mark" onClick={() => setDebtPaid(d.id, !d.paid)}>{d.paid ? "Reabrir" : (d.direction === "they_owe" ? "Cobrado" : "Pagado")}</button>
+        <div className="b">›</div>
       </div>
     </div>
   );
 
   return (
+    <>
     <Sheet onClose={onClose} title="Deudas · fiado" lead="Lleva quién te debe y a quién le debes.">
       <div className="stat-grid" style={{ marginBottom: 14 }}>
         <div className="mini-stat"><div className="ms-k">Por cobrar</div><div className="ms-v" style={{ color: "var(--green)" }}>${fmt(receivableUSD(s))}</div><div className="ms-sub">me deben</div></div>
@@ -1418,6 +1420,43 @@ function DebtsSheet({ s, onClose }) {
           </>}
         </>
       )}
+    </Sheet>
+    {openId && <DebtDetailSheet debt={debts.find((d) => d.id === openId)} onClose={() => setOpenId(null)} />}
+    </>
+  );
+}
+
+/* ============================== DEBT DETAIL ============================== */
+function DebtDetailSheet({ debt, onClose }) {
+  if (!debt) return null;
+  const theyOwe = debt.direction === "they_owe";
+  const sym = debt.currency === "BS" ? "Bs" : debt.currency === "USDT" ? "₮" : "$";
+  const color = debt.paid ? "var(--txt-mute)" : theyOwe ? "var(--green)" : "var(--coral)";
+  const fmtDate = (d) => d ? new Date(d).toLocaleString("es-VE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  return (
+    <Sheet onClose={onClose} title={debt.who} lead={theyOwe ? "Te debe" : "Le debes"}>
+      <div className="hero" style={{ marginBottom: 16 }}>
+        <div className="hero-label">{theyOwe ? "Monto que te deben" : "Monto que debes"}</div>
+        <div className="hero-amount" style={{ fontSize: 40, color }}>{fmt(debt.amount, debt.currency === "BS" ? 0 : 2)}<span className="cur" style={{ marginLeft: 8 }}>{sym}</span></div>
+        <div className="hero-sub">
+          <div className="hero-stat"><div className="k">Estado</div><div className="v" style={{ color: debt.paid ? "var(--txt-soft)" : "var(--gold)" }}>{debt.paid ? "✓ Saldada" : "Pendiente"}</div></div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <DtRow k="¿Quién?" v={debt.who} />
+        <DtRow k="Tipo" v={theyOwe ? "Me debe" : "Yo le debo"} accent={theyOwe} coral={!theyOwe} />
+        <DtRow k="Concepto" v={debt.concept || "—"} />
+        <DtRow k="Registrada" v={fmtDate(debt.date)} />
+        {debt.paid && <DtRow k="Saldada el" v={fmtDate(debt.paidDate)} />}
+      </div>
+
+      <button className={`btn ${debt.paid ? "btn-ghost" : "btn-primary"}`} onClick={() => { setDebtPaid(debt.id, !debt.paid); onClose(); }}>
+        {debt.paid ? "Reabrir deuda" : (theyOwe ? "Marcar como cobrada" : "Marcar como pagada")}
+      </button>
+      <button className="btn btn-coral" style={{ marginTop: 10 }} onClick={() => { if (confirm("¿Eliminar esta deuda?")) { removeDebt(debt.id); onClose(); } }}>
+        Eliminar deuda
+      </button>
     </Sheet>
   );
 }
