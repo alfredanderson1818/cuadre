@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CHANNELS, useStore, addOp, addClient, addAccount, addMovement, accountLedger, accountStats, setRate, clearData,
+  addDebt, setDebtPaid, removeDebt, pendingDebts, receivableUSD, payableUSD,
   accountById, clientById, totalUSD, balanceByKind, profitTotalBs, profitByDay,
   fmt, fmtUSD, fmtBs, fmtCur, relTime, toUSD,
   getToken, getSession, login, register, logout, bootstrap, getProfile, saveProfile, fetchLiveRates,
@@ -56,6 +57,7 @@ export default function App() {
   const [group, setGroup] = useState(null);
   const [clientDetailId, setClientDetailId] = useState(null);
   const [accountDetailId, setAccountDetailId] = useState(null);
+  const [debtsOpen, setDebtsOpen] = useState(false);
   const s = useStore();
 
   // Restaura sesión guardada al abrir (y al reintentar acceso)
@@ -78,7 +80,7 @@ export default function App() {
   return (
     <div className="shell">
       <main className="screen" key={tab}>
-        {tab === "home" && <Home s={s} session={session} go={setTab} openSheet={setSheet} openDetail={setDetailId} />}
+        {tab === "home" && <Home s={s} session={session} go={setTab} openSheet={setSheet} openDetail={setDetailId} openDebts={() => setDebtsOpen(true)} />}
         {tab === "ops" && <Ops s={s} openDetail={setDetailId} />}
         {tab === "wallets" && <Wallets s={s} openSheet={setSheet} openAccount={setAccountDetailId} />}
         {tab === "clients" && <Clients s={s} openSheet={setSheet} openClient={setClientDetailId} />}
@@ -96,6 +98,7 @@ export default function App() {
       {group && <GroupSheet group={group} s={s} onClose={() => setGroup(null)} openDetail={(id) => { setGroup(null); setDetailId(id); }} />}
       {clientDetailId && <ClientDetailSheet client={s.clients.find((c) => c.id === clientDetailId)} s={s} onClose={() => setClientDetailId(null)} openDetail={(id) => { setClientDetailId(null); setDetailId(id); }} />}
       {accountDetailId && <AccountDetailSheet account={s.accounts.find((a) => a.id === accountDetailId)} s={s} onClose={() => setAccountDetailId(null)} openDetail={(id) => { setAccountDetailId(null); setDetailId(id); }} />}
+      {debtsOpen && <DebtsSheet s={s} onClose={() => setDebtsOpen(false)} />}
       {detailOp && <OpDetailSheet op={detailOp} s={s} onClose={() => setDetailId(null)} />}
     </div>
   );
@@ -399,7 +402,7 @@ function Nav({ tab, setTab, onAdd }) {
 }
 
 /* ============================== HOME ============================== */
-function Home({ s, session, go, openSheet, openDetail }) {
+function Home({ s, session, go, openSheet, openDetail, openDebts }) {
   const total = totalUSD(s);
   const profitBs = profitTotalBs(s);
   const profitUSD = profitBs / s.rate;
@@ -459,12 +462,33 @@ function Home({ s, session, go, openSheet, openDetail }) {
         })}
       </div>
 
+      {(() => {
+        const rec = receivableUSD(s); const pay = payableUSD(s); const pend = pendingDebts(s).length;
+        if (pend === 0 && rec === 0 && pay === 0) {
+          return <button className="btn btn-ghost" onClick={openDebts} style={{ marginBottom: 22 }}>＋ Anotar una deuda (fiado)</button>;
+        }
+        return (
+          <button className="debt-card" onClick={openDebts}>
+            <div className="debt-col">
+              <div className="debt-k">Por cobrar</div>
+              <div className="debt-v up">${fmt(rec, 2)}</div>
+            </div>
+            <div className="debt-sep" />
+            <div className="debt-col">
+              <div className="debt-k">Por pagar</div>
+              <div className="debt-v down">${fmt(pay, 2)}</div>
+            </div>
+            <div className="debt-go">{pend} pend ›</div>
+          </button>
+        );
+      })()}
+
       <div className="section-head">
         <h3>Últimos cambios</h3>
         <button className="link-btn" onClick={() => go("ops")}>Ver todo</button>
       </div>
       <div className="card">
-        {s.ops.slice(0, 4).map((o) => <OpRow key={o.id} o={o} s={s} onClick={openDetail} />)}
+        {s.ops.length === 0 ? <Empty icon="💱" text="Aún no hay cambios. Toca + para registrar el primero." /> : s.ops.slice(0, 4).map((o) => <OpRow key={o.id} o={o} s={s} onClick={openDetail} />)}
       </div>
     </div>
   );
@@ -782,6 +806,11 @@ function OpSheet({ s, onClose }) {
   const [addingClient, setAddingClient] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
+  const [topupAmt, setTopupAmt] = useState("");          // fondear cuenta sin saldo
+  const [showTopup, setShowTopup] = useState(false);
+  const [debtOn, setDebtOn] = useState(false);           // anotar deuda
+  const [debtAmt, setDebtAmt] = useState("");
+  const [debtConcept, setDebtConcept] = useState("");
 
   // Sincroniza costo ↔ % ↔ tasa al cliente
   function onPct(v) {
@@ -835,10 +864,24 @@ function OpSheet({ s, onClose }) {
   }, [inAmt, rate, costRate, pct, cross, inCur, outCur, s.rate]);
 
   const valid = clientId && inId && outId && inId !== outId && parseFloat(inAmt) > 0 && (cross || parseFloat(rate) > 0);
+  // saldo insuficiente en la cuenta de la que entrego
+  const shortfall = outAcc && calc.outAmt > 0 ? +(calc.outAmt - outAcc.balance).toFixed(2) : 0;
+  const lowFunds = shortfall > 0;
+
+  function doTopup() {
+    const amt = parseFloat(topupAmt);
+    if (!outAcc || isNaN(amt) || amt <= 0) return;
+    addMovement({ accId: outId, type: "deposit", amount: amt, note: "Fondeo para cambio" });
+    setTopupAmt(""); setShowTopup(false);
+  }
 
   function save() {
     if (!valid) return;
     addOp({ clientId, inId, inAmt, outId, outAmt: calc.outAmt, rate, costRate, profitBs: calc.profitBs, pct: calc.pct, cross });
+    if (debtOn && parseFloat(debtAmt) > 0) {
+      const cli = clientById(s, clientId);
+      addDebt({ who: cli?.name || "Cliente", clientId, direction: "they_owe", amount: debtAmt, currency: inAcc?.currency || "USD", concept: debtConcept || "Fiado de cambio" });
+    }
     onClose();
   }
 
@@ -956,6 +999,41 @@ function OpSheet({ s, onClose }) {
       </div>
 
       {inId === outId && <p style={{ color: "var(--coral)", fontSize: 12, marginBottom: 12 }}>El canal que recibes y el que entregas deben ser distintos.</p>}
+
+      {lowFunds && inId !== outId && (
+        <div className="warn-box">
+          <div className="warn-top">
+            <span>⚠️ Saldo insuficiente en <b>{outAcc?.name}</b></span>
+          </div>
+          <div className="warn-sub">Tienes {fmtCur(outAcc.balance, outAcc.currency)} y necesitas entregar {fmtCur(calc.outAmt, outAcc.currency)}. Te faltan <b>{fmtCur(shortfall, outAcc.currency)}</b>.</div>
+          {!showTopup ? (
+            <button className="btn btn-ghost" style={{ marginTop: 10 }} onClick={() => { setShowTopup(true); setTopupAmt(String(shortfall)); }}>＋ Agregar fondos a {outAcc?.name}</button>
+          ) : (
+            <div className="inline-add" style={{ borderStyle: "solid", marginTop: 10 }}>
+              <div className="input-money">
+                <span className="pfx">{outAcc.currency === "BS" ? "Bs" : outAcc.currency === "USDT" ? "₮" : "$"}</span>
+                <input className="input" autoFocus inputMode="decimal" value={topupAmt} onChange={(e) => setTopupAmt(e.target.value)} />
+              </div>
+              <button className="btn btn-primary" onClick={doTopup}>Ingresar fondos</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <button type="button" className="debt-toggle" onClick={() => setDebtOn((v) => !v)}>
+        <span>🤝 {debtOn ? "Quitar deuda" : "El cliente me queda debiendo (fiado)"}</span>
+        <span className="debt-toggle-x">{debtOn ? "−" : "+"}</span>
+      </button>
+      {debtOn && (
+        <div className="inline-add" style={{ marginBottom: 14 }}>
+          <div className="input-money">
+            <span className="pfx">{inAcc?.currency === "BS" ? "Bs" : inAcc?.currency === "USDT" ? "₮" : "$"}</span>
+            <input className="input" inputMode="decimal" placeholder="¿Cuánto te debe?" value={debtAmt} onChange={(e) => setDebtAmt(e.target.value)} />
+          </div>
+          <input className="input" placeholder="Concepto (opcional)" value={debtConcept} onChange={(e) => setDebtConcept(e.target.value)} />
+          <p style={{ fontSize: 11, color: "var(--txt-mute)" }}>Se anotará en Deudas como "{clientById(s, clientId)?.name || "Cliente"} me debe".</p>
+        </div>
+      )}
 
       <button className={`btn ${valid ? "btn-primary" : "btn-ghost"}`} onClick={save} disabled={!valid}>
         Registrar cambio
@@ -1254,6 +1332,92 @@ function ExportSheet({ s, onClose }) {
         🗄️ Respaldo completo (JSON)
       </button>
       <p className="dt-note" style={{ marginTop: 14 }}>El CSV se abre en Excel o Google Sheets. El respaldo JSON guarda todo (cuentas, clientes, operaciones y tasas).</p>
+    </Sheet>
+  );
+}
+
+/* ============================== DEBTS (por cobrar / fiado) ============================== */
+function DebtsSheet({ s, onClose }) {
+  const [adding, setAdding] = useState(false);
+  const [dir, setDir] = useState("they_owe");
+  const [who, setWho] = useState("");
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [concept, setConcept] = useState("");
+
+  const debts = s.debts || [];
+  const pend = debts.filter((d) => !d.paid);
+  const paid = debts.filter((d) => d.paid);
+  const sym = (c) => (c === "BS" ? "Bs" : c === "USDT" ? "₮" : "$");
+
+  function save() {
+    if (!who.trim() || !(parseFloat(amount) > 0)) return;
+    addDebt({ who: who.trim(), direction: dir, amount, currency, concept });
+    setWho(""); setAmount(""); setConcept(""); setAdding(false);
+  }
+
+  const Row = (d) => (
+    <div className="row" key={d.id}>
+      <div className="row-ic" style={{ background: d.direction === "they_owe" ? "var(--green-glow)" : "var(--coral-soft)", color: d.direction === "they_owe" ? "var(--green)" : "var(--coral)", opacity: d.paid ? 0.5 : 1 }}>
+        {d.direction === "they_owe" ? "↓" : "↑"}
+      </div>
+      <div className="row-main" style={{ opacity: d.paid ? 0.5 : 1 }}>
+        <div className="row-title" style={d.paid ? { textDecoration: "line-through" } : {}}>{d.who}</div>
+        <div className="row-sub">{d.direction === "they_owe" ? "Me debe" : "Le debo"}{d.concept ? ` · ${d.concept}` : ""}</div>
+      </div>
+      <div className="row-amt" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+        <div className="a" style={{ color: d.paid ? "var(--txt-mute)" : d.direction === "they_owe" ? "var(--green)" : "var(--coral)" }}>{fmt(d.amount, d.currency === "BS" ? 0 : 2)} {sym(d.currency)}</div>
+        <button className="debt-mark" onClick={() => setDebtPaid(d.id, !d.paid)}>{d.paid ? "Reabrir" : (d.direction === "they_owe" ? "Cobrado" : "Pagado")}</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <Sheet onClose={onClose} title="Deudas · fiado" lead="Lleva quién te debe y a quién le debes.">
+      <div className="stat-grid" style={{ marginBottom: 14 }}>
+        <div className="mini-stat"><div className="ms-k">Por cobrar</div><div className="ms-v" style={{ color: "var(--green)" }}>${fmt(receivableUSD(s))}</div><div className="ms-sub">me deben</div></div>
+        <div className="mini-stat"><div className="ms-k">Por pagar</div><div className="ms-v" style={{ color: "var(--coral)" }}>${fmt(payableUSD(s))}</div><div className="ms-sub">yo debo</div></div>
+      </div>
+
+      {!adding ? (
+        <button className="btn btn-ghost" onClick={() => setAdding(true)} style={{ marginBottom: 16 }}>＋ Anotar deuda</button>
+      ) : (
+        <div className="inline-add" style={{ borderStyle: "solid", marginBottom: 16 }}>
+          <div className="seg">
+            <button type="button" className={dir === "they_owe" ? "on-in" : ""} onClick={() => setDir("they_owe")}>Me deben</button>
+            <button type="button" className={dir === "i_owe" ? "on-out" : ""} onClick={() => setDir("i_owe")}>Yo debo</button>
+          </div>
+          <input className="input" autoFocus placeholder="¿Quién? (nombre)" value={who} onChange={(e) => setWho(e.target.value)} />
+          <div className="field-row" style={{ gap: 10 }}>
+            <div className="input-money" style={{ flex: 2 }}>
+              <span className="pfx">{sym(currency)}</span>
+              <input className="input" inputMode="decimal" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            </div>
+            <select className="select" style={{ flex: 1 }} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              <option value="USD">USD</option>
+              <option value="USDT">USDT</option>
+              <option value="BS">Bs</option>
+            </select>
+          </div>
+          <input className="input" placeholder="Concepto (ej: comida)" value={concept} onChange={(e) => setConcept(e.target.value)} />
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn btn-ghost" onClick={() => setAdding(false)} style={{ flex: 1 }}>Cancelar</button>
+            <button className={`btn ${who.trim() && parseFloat(amount) > 0 ? "btn-primary" : "btn-ghost"}`} onClick={save} style={{ flex: 2 }}>Guardar deuda</button>
+          </div>
+        </div>
+      )}
+
+      {pend.length === 0 && paid.length === 0 ? (
+        <Empty icon="🤝" text="Sin deudas registradas. Anota quién te debe (o a quién le debes)." />
+      ) : (
+        <>
+          {pend.length > 0 && <div className="card">{pend.map(Row)}</div>}
+          {paid.length > 0 && <>
+            <div className="eyebrow" style={{ margin: "16px 0 10px" }}>Saldadas</div>
+            <div className="card">{paid.map(Row)}</div>
+          </>}
+        </>
+      )}
     </Sheet>
   );
 }

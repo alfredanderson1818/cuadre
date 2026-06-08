@@ -23,7 +23,7 @@ let profile = null;      // { email, name, business, phone }
 let access = null;       // { active, plan, paid_until } — control de acceso (pago)
 
 function emptyState() {
-  return { rate: 0, rates: { bcv: null, euro: null, binance: null, updatedAt: null }, accounts: [], clients: [], ops: [], moves: [] };
+  return { rate: 0, rates: { bcv: null, euro: null, binance: null, updatedAt: null }, accounts: [], clients: [], ops: [], moves: [], debts: [] };
 }
 let state = emptyState();
 
@@ -149,6 +149,37 @@ export function addMovement({ accId, type, amount, note }) {
   return mv;
 }
 
+/* ---- Deudas / cuentas por cobrar (fiado) ------------------ */
+export function addDebt({ who, clientId, direction, amount, currency, concept, opId }) {
+  const d = {
+    id: "d" + Date.now(), ts: nowOrSeq(), date: new Date().toISOString(),
+    who: who || "", clientId: clientId || null, direction: direction || "they_owe",
+    amount: +amount || 0, currency: currency || "USD", concept: concept || "",
+    paid: false, opId: opId || null,
+  };
+  state = { ...state, debts: [d, ...(state.debts || [])] };
+  emit();
+  return d;
+}
+export function setDebtPaid(id, paid) {
+  state = {
+    ...state,
+    debts: (state.debts || []).map((d) => d.id === id ? { ...d, paid, paidDate: paid ? new Date().toISOString() : null } : d),
+  };
+  emit();
+}
+export function removeDebt(id) {
+  state = { ...state, debts: (state.debts || []).filter((d) => d.id !== id) };
+  emit();
+}
+export function pendingDebts(s) { return (s.debts || []).filter((d) => !d.paid); }
+export function receivableUSD(s) {
+  return pendingDebts(s).filter((d) => d.direction === "they_owe").reduce((t, d) => t + toUSD(d.amount, d.currency, s.rate), 0);
+}
+export function payableUSD(s) {
+  return pendingDebts(s).filter((d) => d.direction === "i_owe").reduce((t, d) => t + toUSD(d.amount, d.currency, s.rate), 0);
+}
+
 // Historial combinado de una cuenta (movimientos manuales + cambios que la tocan)
 export function accountLedger(s, accId) {
   const acc = accountById(s, accId);
@@ -255,6 +286,7 @@ function seedFresh() {
     clients: [],
     ops: [],
     moves: [],
+    debts: [],
     profile: { name: "", business: "", phone: "" },
   };
 }
@@ -287,6 +319,9 @@ function seedDemoState() {
       mk("o3", "c2", "a1", 80, "a4", 60880, 761, 752),
     ],
     moves: [],
+    debts: [
+      { id: "d1", ts: baseTime, date: new Date().toISOString(), who: "Mora", clientId: null, direction: "they_owe", amount: 120, currency: "USD", concept: "Comida", paid: false },
+    ],
   };
 }
 
