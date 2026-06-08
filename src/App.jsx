@@ -417,7 +417,7 @@ function OpRow({ o, s, onClick }) {
       </div>
       <div className="row-amt">
         <div className="a">{fmtCur(o.inAmt, inAcc?.currency)}</div>
-        <div className="b up">+{fmt(o.profitBs)} Bs</div>
+        <div className="b" style={{ color: o.profitBs < 0 ? "var(--coral)" : "var(--green)" }}>{o.profitBs >= 0 ? "+" : ""}{fmt(o.profitBs)} Bs</div>
       </div>
     </div>
   );
@@ -642,11 +642,30 @@ function OpSheet({ s, onClose }) {
   const [inId, setInId] = useState(s.accounts.find((a) => a.kind !== "bs")?.id || "");
   const [outId, setOutId] = useState(s.accounts.find((a) => a.kind === "bs")?.id || "");
   const [inAmt, setInAmt] = useState("");
-  const [rate, setRateLocal] = useState(String(s.rate));
-  const [costRate, setCostRate] = useState("");
+  const [costRate, setCostRate] = useState(String(s.rate)); // tasa base / costo
+  const [pct, setPct] = useState("");                        // % de ganancia (±)
+  const [rate, setRateLocal] = useState(String(s.rate));     // tasa al cliente (derivada)
   const [addingClient, setAddingClient] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
+
+  // Sincroniza costo ↔ % ↔ tasa al cliente
+  function onPct(v) {
+    setPct(v);
+    const base = parseFloat(costRate), p = parseFloat(v);
+    if (!isNaN(base) && !isNaN(p)) setRateLocal((base * (1 + p / 100)).toFixed(2));
+  }
+  function onRate(v) {
+    setRateLocal(v);
+    const base = parseFloat(costRate), r = parseFloat(v);
+    if (!isNaN(base) && base !== 0 && !isNaN(r)) setPct((((r / base) - 1) * 100).toFixed(2));
+  }
+  function onCost(v) {
+    setCostRate(v);
+    const base = parseFloat(v), p = parseFloat(pct), r = parseFloat(rate);
+    if (!isNaN(base) && !isNaN(p)) setRateLocal((base * (1 + p / 100)).toFixed(2));
+    else if (!isNaN(base) && base !== 0 && !isNaN(r)) setPct((((r / base) - 1) * 100).toFixed(2));
+  }
 
   function createClient() {
     if (!newName.trim()) return;
@@ -670,7 +689,8 @@ function OpSheet({ s, onClose }) {
     else { usd = amt; outAmt = amt * r; }                          // recibo divisa → entrego Bs
     if (outCur !== "BS" && inCur !== "BS") outAmt = amt;           // divisa ↔ divisa 1:1
     const profitBs = +((r - cr) * usd).toFixed(2);
-    return { usd, outAmt: +outAmt.toFixed(2), profitBs, outCur };
+    const pctReal = cr ? +(((r / cr) - 1) * 100).toFixed(2) : 0;
+    return { usd, outAmt: +outAmt.toFixed(2), profitBs, outCur, pct: pctReal };
   }, [inAmt, rate, costRate, inAcc, outAcc]);
 
   const valid = clientId && inId && outId && inId !== outId && parseFloat(inAmt) > 0 && parseFloat(rate) > 0;
@@ -722,13 +742,21 @@ function OpSheet({ s, onClose }) {
 
       <div className="field-row">
         <div className="field">
-          <label>Tasa aplicada (Bs/$)</label>
-          <input className="input" inputMode="decimal" value={rate} onChange={(e) => setRateLocal(e.target.value)} />
+          <label>Tasa costo / base (Bs/$)</label>
+          <input className="input" inputMode="decimal" value={costRate} onChange={(e) => onCost(e.target.value)} />
         </div>
         <div className="field">
-          <label>Tasa costo (opcional)</label>
-          <input className="input" inputMode="decimal" placeholder={rate} value={costRate} onChange={(e) => setCostRate(e.target.value)} />
+          <label>% ganancia</label>
+          <div className="input-money">
+            <span className="pfx" style={{ left: "auto", right: 15 }}>%</span>
+            <input className="input" inputMode="text" placeholder="0" value={pct}
+              onChange={(e) => onPct(e.target.value)} style={{ paddingLeft: 15, paddingRight: 34 }} />
+          </div>
         </div>
+      </div>
+      <div className="field">
+        <label>Tasa al cliente (Bs/$)</label>
+        <input className="input" inputMode="decimal" value={rate} onChange={(e) => onRate(e.target.value)} />
       </div>
 
       <div className="field">
@@ -747,9 +775,17 @@ function OpSheet({ s, onClose }) {
           <span className="k">Entregas al cliente</span>
           <span className="v down">{fmtCur(calc.outAmt, calc.outCur)}</span>
         </div>
+        <div className="calc-row">
+          <span className="k">% de ganancia</span>
+          <span className="v" style={{ color: calc.pct < 0 ? "var(--coral)" : "var(--green)" }}>
+            {calc.pct > 0 ? "+" : ""}{fmt(calc.pct, 2)}%
+          </span>
+        </div>
         <div className="calc-row big">
           <span className="k">Tu ganancia</span>
-          <span className="v">+{fmt(calc.profitBs)} Bs</span>
+          <span className="v" style={calc.profitBs < 0 ? { color: "var(--coral)" } : {}}>
+            {calc.profitBs >= 0 ? "+" : ""}{fmt(calc.profitBs)} Bs
+          </span>
         </div>
       </div>
 
@@ -847,6 +883,7 @@ function OpDetailSheet({ op, s, onClose }) {
   const inMeta = CHANNELS[inAcc?.kind];
   const outMeta = CHANNELS[outAcc?.kind];
   const usd = toUSD(op.inAmt, inAcc?.currency, op.rate);
+  const pctOp = op.costRate ? +(((op.rate / op.costRate) - 1) * 100).toFixed(2) : 0;
   const fecha = op.date
     ? new Date(op.date).toLocaleString("es-VE", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
     : relTime(op.ts, s);
@@ -882,10 +919,11 @@ function OpDetailSheet({ op, s, onClose }) {
 
       <div className="card" style={{ marginBottom: 16 }}>
         <DtRow k="Equivalente en divisa" v={`$${fmt(usd)}`} />
-        <DtRow k="Tasa aplicada" v={`${fmt(op.rate, 2)} Bs/$`} />
-        <DtRow k="Tasa de costo" v={`${fmt(op.costRate, 2)} Bs/$`} />
-        <DtRow k="Tu ganancia" v={`+${fmt(op.profitBs)} Bs`} accent />
-        <DtRow k="≈ ganancia en USD" v={`+${fmtUSD(op.profitBs / op.rate)}`} />
+        <DtRow k="Tasa al cliente" v={`${fmt(op.rate, 2)} Bs/$`} />
+        <DtRow k="Tasa de costo / base" v={`${fmt(op.costRate, 2)} Bs/$`} />
+        <DtRow k="% de ganancia" v={`${pctOp > 0 ? "+" : ""}${fmt(pctOp, 2)}%`} accent={pctOp >= 0} coral={pctOp < 0} />
+        <DtRow k="Tu ganancia" v={`${op.profitBs >= 0 ? "+" : ""}${fmt(op.profitBs)} Bs`} accent={op.profitBs >= 0} coral={op.profitBs < 0} />
+        <DtRow k="≈ ganancia en USD" v={`${op.profitBs >= 0 ? "+" : ""}${fmtUSD(op.profitBs / op.rate)}`} />
       </div>
 
       <p className="dt-note">El comprobante que compartes con el cliente <b>no incluye</b> tu ganancia ni la tasa de costo.</p>
@@ -900,11 +938,12 @@ function OpDetailSheet({ op, s, onClose }) {
     </Sheet>
   );
 }
-function DtRow({ k, v, accent }) {
+function DtRow({ k, v, accent, coral }) {
+  const color = coral ? "var(--coral)" : accent ? "var(--green)" : undefined;
   return (
     <div className="row" style={{ padding: "11px 0" }}>
       <div className="row-main"><div className="row-sub" style={{ fontSize: 13 }}>{k}</div></div>
-      <div className={`row-amt`}><div className="a" style={accent ? { color: "var(--green)", fontSize: 17 } : {}}>{v}</div></div>
+      <div className={`row-amt`}><div className="a" style={color ? { color, fontSize: 17 } : {}}>{v}</div></div>
     </div>
   );
 }
