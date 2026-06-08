@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  CHANNELS, useStore, addOp, addClient, addAccount, setRate, clearData,
+  CHANNELS, useStore, addOp, addClient, addAccount, addMovement, accountLedger, accountStats, setRate, clearData,
   accountById, clientById, totalUSD, balanceByKind, profitTotalBs, profitByDay,
   fmt, fmtUSD, fmtBs, fmtCur, relTime, toUSD,
   getToken, getSession, login, register, logout, bootstrap, getProfile, saveProfile, fetchLiveRates,
@@ -55,6 +55,7 @@ export default function App() {
   const [detailId, setDetailId] = useState(null);
   const [group, setGroup] = useState(null);
   const [clientDetailId, setClientDetailId] = useState(null);
+  const [accountDetailId, setAccountDetailId] = useState(null);
   const s = useStore();
 
   // Restaura sesión guardada al abrir (y al reintentar acceso)
@@ -79,9 +80,9 @@ export default function App() {
       <main className="screen" key={tab}>
         {tab === "home" && <Home s={s} session={session} go={setTab} openSheet={setSheet} openDetail={setDetailId} />}
         {tab === "ops" && <Ops s={s} openDetail={setDetailId} />}
-        {tab === "wallets" && <Wallets s={s} openSheet={setSheet} />}
+        {tab === "wallets" && <Wallets s={s} openSheet={setSheet} openAccount={setAccountDetailId} />}
         {tab === "clients" && <Clients s={s} openSheet={setSheet} openClient={setClientDetailId} />}
-        {tab === "reports" && <Reports s={s} openGroup={setGroup} openExport={() => setSheet("export")} />}
+        {tab === "reports" && <Reports s={s} openGroup={setGroup} openExport={() => setSheet("export")} openAccount={setAccountDetailId} />}
       </main>
 
       <Nav tab={tab} setTab={setTab} onAdd={() => setSheet("op")} />
@@ -94,6 +95,7 @@ export default function App() {
       {sheet === "profile" && <ProfileSheet session={session} onClose={() => setSheet(null)} onLogout={doLogout} />}
       {group && <GroupSheet group={group} s={s} onClose={() => setGroup(null)} openDetail={(id) => { setGroup(null); setDetailId(id); }} />}
       {clientDetailId && <ClientDetailSheet client={s.clients.find((c) => c.id === clientDetailId)} s={s} onClose={() => setClientDetailId(null)} openDetail={(id) => { setClientDetailId(null); setDetailId(id); }} />}
+      {accountDetailId && <AccountDetailSheet account={s.accounts.find((a) => a.id === accountDetailId)} s={s} onClose={() => setAccountDetailId(null)} openDetail={(id) => { setAccountDetailId(null); setDetailId(id); }} />}
       {detailOp && <OpDetailSheet op={detailOp} s={s} onClose={() => setDetailId(null)} />}
     </div>
   );
@@ -145,6 +147,84 @@ function vePhoneJS(raw) {
   if (d.startsWith("58")) return d;
   if (d.startsWith("0")) return "58" + d.slice(1);
   return "58" + d;
+}
+
+/* ============================== ACCOUNT DETAIL ============================== */
+function AccountDetailSheet({ account, s, onClose, openDetail }) {
+  const [mode, setMode] = useState(null); // 'deposit' | 'withdraw' | 'adjust' | null
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  if (!account) return null;
+  const meta = CHANNELS[account.kind];
+  const cur = account.currency;
+  const sym = cur === "BS" ? "Bs" : cur === "USDT" ? "₮" : "$";
+  const led = accountLedger(s, account.id);
+  const st = accountStats(s, account.id);
+
+  function confirm() {
+    const amt = parseFloat(amount);
+    if (isNaN(amt)) return;
+    addMovement({ accId: account.id, type: mode, amount: amt, note });
+    setAmount(""); setNote(""); setMode(null);
+  }
+  const modeLabel = mode === "deposit" ? "Ingresar" : mode === "withdraw" ? "Retirar" : "Nuevo saldo";
+
+  return (
+    <Sheet onClose={onClose} title={account.name} lead={`${meta.label} · saldo actual`}>
+      <div className="hero" style={{ marginBottom: 16 }}>
+        <div className="hero-label">Saldo en esta cuenta</div>
+        <div className="hero-amount" style={{ fontSize: 36 }}>{fmt(account.balance, cur === "BS" ? 0 : 2)}<span className="cur" style={{ marginLeft: 8 }}>{sym}</span></div>
+        <div className="hero-sub">
+          <div className="hero-stat"><div className="k">≈ USD</div><div className="v">${fmt(toUSD(account.balance, cur, s.rate))}</div></div>
+          <div className="hero-stat"><div className="k">Entradas</div><div className="v up">+{fmt(st.inSum, cur === "BS" ? 0 : 2)}</div></div>
+          <div className="hero-stat"><div className="k">Salidas</div><div className="v down">−{fmt(st.outSum, cur === "BS" ? 0 : 2)}</div></div>
+        </div>
+      </div>
+
+      {!mode ? (
+        <div className="acc-actions">
+          <button className="acc-btn in" onClick={() => setMode("deposit")}>＋ Ingresar</button>
+          <button className="acc-btn out" onClick={() => setMode("withdraw")}>− Retirar</button>
+          <button className="acc-btn adj" onClick={() => { setMode("adjust"); setAmount(String(account.balance)); }}>✎ Ajustar</button>
+        </div>
+      ) : (
+        <div className="inline-add" style={{ borderStyle: "solid", marginBottom: 16 }}>
+          <div className="label-row"><label>{modeLabel} ({sym})</label>
+            <button type="button" className="link-btn" onClick={() => { setMode(null); setAmount(""); }}>Cancelar</button></div>
+          <div className="input-money">
+            <span className="pfx">{sym}</span>
+            <input className="input" autoFocus inputMode="decimal" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <input className="input" placeholder="Nota (opcional)" value={note} onChange={(e) => setNote(e.target.value)} />
+          <button className={`btn ${parseFloat(amount) >= 0 || mode === "withdraw" ? "btn-primary" : "btn-ghost"}`} onClick={confirm}>
+            Confirmar {modeLabel.toLowerCase()}
+          </button>
+        </div>
+      )}
+
+      <div className="section-head" style={{ margin: "6px 2px 10px" }}>
+        <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 16 }}>Movimientos</h3>
+        <span className="link-btn" style={{ pointerEvents: "none", color: "var(--txt-mute)" }}>{led.length}</span>
+      </div>
+      <div className="card">
+        {led.length === 0 ? <Empty icon="🧾" text="Sin movimientos todavía. Usa Ingresar para fondear esta cuenta." />
+          : led.map((it, i) => (
+            <div className={`row ${it.opId ? "row-tap" : ""}`} key={i} onClick={it.opId ? () => openDetail(it.opId) : undefined}>
+              <div className="row-ic" style={{ background: it.amount >= 0 ? "var(--green-glow)" : "var(--coral-soft)", color: it.amount >= 0 ? "var(--green)" : "var(--coral)" }}>
+                {it.amount >= 0 ? "↓" : "↑"}
+              </div>
+              <div className="row-main">
+                <div className="row-title">{it.label}</div>
+                <div className="row-sub">{it.sub || "—"} · {it.date ? new Date(it.date).toLocaleDateString("es-VE") : relTime(it.ts, s)}</div>
+              </div>
+              <div className="row-amt">
+                <div className="a" style={{ color: it.amount >= 0 ? "var(--green)" : "var(--coral)" }}>{it.amount >= 0 ? "+" : ""}{fmt(it.amount, cur === "BS" ? 0 : 2)} {sym}</div>
+              </div>
+            </div>
+          ))}
+      </div>
+    </Sheet>
+  );
 }
 
 /* ============================== GROUP SHEET ============================== */
@@ -476,12 +556,12 @@ function Ops({ s, openDetail }) {
 }
 
 /* ============================== WALLETS ============================== */
-function Wallets({ s, openSheet }) {
+function Wallets({ s, openSheet, openAccount }) {
   return (
     <div className="stagger">
       <div className="eyebrow">Inventario</div>
       <h1 className="screen-title">Mis <span className="accent">cuentas</span></h1>
-      <p className="screen-lead">Saldo por canal y por cuenta. Equiv. total ${fmt(totalUSD(s))}.</p>
+      <p className="screen-lead">Toca una cuenta para ingresar, retirar o ver movimientos. Equiv. total ${fmt(totalUSD(s))}.</p>
       <div style={{ height: 16 }} />
       <button className="btn btn-ghost" onClick={() => openSheet("account")} style={{ marginBottom: 18 }}>+ Nueva cuenta</button>
       {Object.keys(CHANNELS).map((kind) => {
@@ -498,13 +578,13 @@ function Wallets({ s, openSheet }) {
               <span className="pill-rate" style={{ padding: "5px 10px" }}>{fmtCur(sub, meta.currency)}</span>
             </div>
             {accs.map((a) => (
-              <div className="row" key={a.id}>
+              <div className="row row-tap" key={a.id} onClick={() => openAccount(a.id)}>
                 <div className="row-ic" style={{ background: `color-mix(in srgb, ${meta.color} 16%, transparent)`, color: meta.color }}>{meta.icon}</div>
                 <div className="row-main">
                   <div className="row-title">{a.name}</div>
                   <div className="row-sub">≈ ${fmt(toUSD(a.balance, a.currency, s.rate))}</div>
                 </div>
-                <div className="row-amt"><div className="a">{fmtCur(a.balance, a.currency)}</div></div>
+                <div className="row-amt"><div className="a">{fmtCur(a.balance, a.currency)}</div><div className="b">›</div></div>
               </div>
             ))}
           </div>
@@ -549,7 +629,7 @@ function Clients({ s, openSheet, openClient }) {
 }
 
 /* ============================== REPORTS ============================== */
-function Reports({ s, openGroup, openExport }) {
+function Reports({ s, openGroup, openExport, openAccount }) {
   const days = profitByDay(s, 7);
   const max = Math.max(...days, 1);
   const totalBs = profitTotalBs(s);
@@ -632,6 +712,24 @@ function Reports({ s, openGroup, openExport }) {
             <div className="row-amt"><div className="a up">+{fmt(c.profit)} Bs</div><div className="b">›</div></div>
           </div>
         ))}
+      </div>
+
+      <div className="card">
+        <div className="section-head" style={{ margin: "0 0 6px" }}><h3>Por cuenta</h3><span className="link-btn" style={{ pointerEvents: "none" }}>saldo · toca</span></div>
+        {s.accounts.length === 0 ? <Empty icon="💳" text="Aún no tienes cuentas. Agrégalas en Cuentas." /> : s.accounts.map((a) => {
+          const m = CHANNELS[a.kind];
+          const st = accountStats(s, a.id);
+          return (
+            <div className="row row-tap" key={a.id} onClick={() => openAccount(a.id)}>
+              <div className="row-ic" style={{ background: `color-mix(in srgb, ${m.color} 16%, transparent)`, color: m.color }}>{m.icon}</div>
+              <div className="row-main">
+                <div className="row-title">{a.name}</div>
+                <div className="row-sub">{st.count} mov · ≈ ${fmt(toUSD(a.balance, a.currency, s.rate), 0)}</div>
+              </div>
+              <div className="row-amt"><div className="a">{fmtCur(a.balance, a.currency)}</div><div className="b">›</div></div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

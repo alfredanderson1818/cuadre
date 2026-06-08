@@ -23,7 +23,7 @@ let profile = null;      // { email, name, business, phone }
 let access = null;       // { active, plan, paid_until } — control de acceso (pago)
 
 function emptyState() {
-  return { rate: 0, rates: { bcv: null, euro: null, binance: null, updatedAt: null }, accounts: [], clients: [], ops: [] };
+  return { rate: 0, rates: { bcv: null, euro: null, binance: null, updatedAt: null }, accounts: [], clients: [], ops: [], moves: [] };
 }
 let state = emptyState();
 
@@ -130,6 +130,49 @@ export function addAccount({ kind, name, balance }) {
   return a;
 }
 
+// Movimiento de cuenta (no es un cambio): ingresar, retirar o ajustar saldo.
+export function addMovement({ accId, type, amount, note }) {
+  const acc = state.accounts.find((a) => a.id === accId);
+  if (!acc) return null;
+  let delta;
+  if (type === "deposit") delta = +amount;
+  else if (type === "withdraw") delta = -Math.abs(+amount);
+  else delta = +(+amount - acc.balance).toFixed(2); // adjust: amount es el nuevo saldo
+  const mv = {
+    id: "m" + Date.now(), ts: nowOrSeq(), date: new Date().toISOString(),
+    accId, type, delta: +(+delta).toFixed(2), note: note || "",
+  };
+  const accounts = state.accounts.map((a) =>
+    a.id === accId ? { ...a, balance: +(a.balance + delta).toFixed(2) } : a);
+  state = { ...state, accounts, moves: [mv, ...(state.moves || [])] };
+  emit();
+  return mv;
+}
+
+// Historial combinado de una cuenta (movimientos manuales + cambios que la tocan)
+export function accountLedger(s, accId) {
+  const acc = accountById(s, accId);
+  const items = [];
+  (s.moves || []).filter((m) => m.accId === accId).forEach((m) => {
+    const label = m.type === "deposit" ? "Ingreso" : m.type === "withdraw" ? "Retiro" : "Ajuste de saldo";
+    items.push({ ts: m.ts, date: m.date, label, sub: m.note, amount: m.delta, kind: "move" });
+  });
+  s.ops.forEach((o) => {
+    const cli = clientById(s, o.clientId);
+    if (o.inId === accId) items.push({ ts: o.ts, date: o.date, label: "Cambio · recibí", sub: cli?.name || "", amount: o.inAmt, kind: "op", opId: o.id });
+    if (o.outId === accId) items.push({ ts: o.ts, date: o.date, label: "Cambio · entregué", sub: cli?.name || "", amount: -o.outAmt, kind: "op", opId: o.id });
+  });
+  return items.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+}
+
+// Totales de entradas/salidas de una cuenta (en su moneda)
+export function accountStats(s, accId) {
+  const led = accountLedger(s, accId);
+  let inSum = 0, outSum = 0;
+  led.forEach((i) => { if (i.amount >= 0) inSum += i.amount; else outSum += -i.amount; });
+  return { inSum: +inSum.toFixed(2), outSum: +outSum.toFixed(2), count: led.length };
+}
+
 // ts incremental para mantener orden sin Date.now determinismo en seed,
 // pero en runtime sí usamos un contador creciente basado en el máximo + 1min
 function nowOrSeq() {
@@ -211,6 +254,7 @@ function seedFresh() {
     ],
     clients: [],
     ops: [],
+    moves: [],
     profile: { name: "", business: "", phone: "" },
   };
 }
@@ -242,6 +286,7 @@ function seedDemoState() {
       mk("o2", "c3", "a2", 1200, "a5", 910800, 759, 748),
       mk("o3", "c2", "a1", 80, "a4", 60880, 761, 752),
     ],
+    moves: [],
   };
 }
 

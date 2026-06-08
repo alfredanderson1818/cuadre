@@ -519,6 +519,14 @@ input, select { font-family: inherit; }
 
 .dt-actions { display: flex; flex-direction: column; gap: 10px; }
 
+/* acciones de cuenta (ingresar / retirar / ajustar) */
+.acc-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 9px; margin-bottom: 18px; }
+.acc-btn { padding: 13px 8px; border-radius: var(--r-md); font-weight: 700; font-size: 13.5px; border: 1px solid var(--line-hi); background: var(--surface); }
+.acc-btn:active { transform: scale(0.97); }
+.acc-btn.in { color: var(--green); border-color: rgba(184,242,74,0.35); }
+.acc-btn.out { color: var(--coral); border-color: rgba(255,107,94,0.3); }
+.acc-btn.adj { color: var(--gold); border-color: rgba(245,196,81,0.3); }
+
 /* ============================================================
    TABLA DE TASAS (BCV / Euro / Binance)
    ============================================================ */
