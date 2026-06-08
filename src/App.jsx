@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CHANNELS, useStore, addOp, addClient, addAccount, addMovement, accountLedger, accountStats, setRate, clearData,
   addDebt, setDebtPaid, removeDebt, pendingDebts, receivableUSD, payableUSD,
@@ -1424,10 +1424,30 @@ function DebtsSheet({ s, onClose }) {
 
 /* ============================== SHEET SHELL ============================== */
 function Sheet({ title, lead, children, onClose }) {
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const startRef = useRef(null);
+
+  function onDown(e) { startRef.current = e.clientY; setDragging(true); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* noop */ } }
+  function onMove(e) { if (startRef.current == null) return; const y = e.clientY - startRef.current; setDragY(y > 0 ? y : 0); }
+  function onUp() {
+    const moved = dragY;
+    startRef.current = null; setDragging(false);
+    if (moved > 110 || moved < 6) onClose(); // arrastrar abajo o tocar = cerrar
+    else setDragY(0);
+  }
+
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-grab" />
+      <div
+        className="sheet"
+        onClick={(e) => e.stopPropagation()}
+        style={{ transform: dragY ? `translateY(${dragY}px)` : undefined, transition: dragging ? "none" : undefined }}
+      >
+        <button className="sheet-close" onClick={onClose} aria-label="Cerrar">✕</button>
+        <div className="sheet-grab-zone" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+          <div className="sheet-grab" />
+        </div>
         <div className="sheet-title">{title}</div>
         <div className="sheet-lead">{lead}</div>
         {children}
