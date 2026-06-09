@@ -850,6 +850,25 @@ function Empty({ icon, text }) {
 }
 
 /* ============================== OP SHEET ============================== */
+function CommRow({ label, val, setVal, unit, setUnit, usd }) {
+  return (
+    <div className="field" style={{ marginBottom: 8 }}>
+      <label>{label}</label>
+      <div className="comm-row">
+        <div className="input-money" style={{ flex: 1 }}>
+          <span className="pfx">{unit === "pct" ? "%" : "$"}</span>
+          <input className="input" inputMode="decimal" placeholder="0" value={val} onChange={(e) => setVal(e.target.value)} />
+        </div>
+        <div className="unit-toggle">
+          <button type="button" className={unit === "pct" ? "on" : ""} onClick={() => setUnit("pct")}>%</button>
+          <button type="button" className={unit === "usd" ? "on" : ""} onClick={() => setUnit("usd")}>$</button>
+        </div>
+      </div>
+      {(parseFloat(val) || 0) > 0 && <div className="comm-hint">= ${fmt(usd)} de comisión</div>}
+    </div>
+  );
+}
+
 function OpSheet({ s, onClose }) {
   const [clientId, setClientId] = useState(s.clients[0]?.id || "");
   const [inId, setInId] = useState(s.accounts.find((a) => a.kind !== "bs")?.id || "");
@@ -866,6 +885,11 @@ function OpSheet({ s, onClose }) {
   const [debtOn, setDebtOn] = useState(false);           // anotar deuda
   const [debtAmt, setDebtAmt] = useState("");
   const [debtConcept, setDebtConcept] = useState("");
+  const [commOn, setCommOn] = useState(false);           // comisiones banco / binance
+  const [bankComm, setBankComm] = useState("");
+  const [bankUnit, setBankUnit] = useState("pct");       // 'pct' | 'usd'
+  const [binComm, setBinComm] = useState("");
+  const [binUnit, setBinUnit] = useState("pct");
 
   // Sincroniza costo ↔ % ↔ tasa al cliente
   function onPct(v) {
@@ -923,6 +947,15 @@ function OpSheet({ s, onClose }) {
   const shortfall = outAcc && calc.outAmt > 0 ? +(calc.outAmt - outAcc.balance).toFixed(2) : 0;
   const lowFunds = shortfall > 0;
 
+  // Comisiones (banco / Binance) → en USD, restan de la ganancia
+  const commToUSD = (v, u) => { const n = parseFloat(v) || 0; return u === "pct" ? (n / 100) * (calc.usd || 0) : n; };
+  const bankUSD = commToUSD(bankComm, bankUnit);
+  const binUSD = commToUSD(binComm, binUnit);
+  const commUSD = +(bankUSD + binUSD).toFixed(2);
+  const convRate = cross ? (s.rate || 0) : (parseFloat(rate) || s.rate || 0);
+  const netProfitBs = +(calc.profitBs - commUSD * convRate).toFixed(2);
+  const netProfitUSD = cross ? +((calc.profitUSD || 0) - commUSD).toFixed(2) : null;
+
   function doTopup() {
     const amt = parseFloat(topupAmt);
     if (!outAcc || isNaN(amt) || amt <= 0) return;
@@ -932,7 +965,12 @@ function OpSheet({ s, onClose }) {
 
   function save() {
     if (!valid) return;
-    addOp({ clientId, inId, inAmt, outId, outAmt: calc.outAmt, rate, costRate, profitBs: calc.profitBs, pct: calc.pct, cross });
+    addOp({
+      clientId, inId, inAmt, outId, outAmt: calc.outAmt, rate, costRate,
+      profitBs: netProfitBs, pct: calc.pct, cross,
+      commUSD,
+      comm: commUSD > 0 ? { bankVal: +parseFloat(bankComm) || 0, bankUnit, binVal: +parseFloat(binComm) || 0, binUnit, bankUSD: +bankUSD.toFixed(2), binUSD: +binUSD.toFixed(2) } : null,
+    });
     if (debtOn && parseFloat(debtAmt) > 0) {
       const cli = clientById(s, clientId);
       addDebt({ who: cli?.name || "Cliente", clientId, direction: "they_owe", amount: debtAmt, currency: inAcc?.currency || "USD", concept: debtConcept || "Fiado de cambio" });
@@ -1018,6 +1056,21 @@ function OpSheet({ s, onClose }) {
         </>
       )}
 
+      <button type="button" className="debt-toggle" onClick={() => setCommOn((v) => !v)} style={{ marginTop: 4 }}>
+        <span>🏦 {commOn ? "Quitar comisiones" : "Comisiones (banco / Binance)"}</span>
+        <span className="debt-toggle-x">{commOn ? "−" : "+"}</span>
+      </button>
+      {commOn && (
+        <div className="inline-add" style={{ marginBottom: 14 }}>
+          <CommRow label="Comisión banco" val={bankComm} setVal={setBankComm} unit={bankUnit} setUnit={setBankUnit} usd={bankUSD} />
+          <CommRow label="Comisión Binance" val={binComm} setVal={setBinComm} unit={binUnit} setUnit={setBinUnit} usd={binUSD} />
+          <div className="calc-row" style={{ padding: "6px 2px 0" }}>
+            <span className="k" style={{ fontWeight: 700 }}>Total comisiones</span>
+            <span className="v down">−${fmt(commUSD)}</span>
+          </div>
+        </div>
+      )}
+
       <div className="calc">
         <div className="calc-row">
           <span className="k">{cross ? "Recibes" : "Equivalente en divisa"}</span>
@@ -1033,22 +1086,34 @@ function OpSheet({ s, onClose }) {
             {calc.pct > 0 ? "+" : ""}{fmt(calc.pct, 2)}%
           </span>
         </div>
+        {commUSD > 0 && (
+          <>
+            <div className="calc-row">
+              <span className="k">Ganancia bruta</span>
+              <span className="v" style={{ color: "var(--txt-soft)" }}>{cross ? fmtCur(calc.profitUSD, inCur) : `${fmt(calc.profitBs)} Bs`}</span>
+            </div>
+            <div className="calc-row">
+              <span className="k">− Comisiones (banco + Binance)</span>
+              <span className="v down">−${fmt(commUSD)}</span>
+            </div>
+          </>
+        )}
         <div className="calc-row big">
-          <span className="k">Tu ganancia</span>
+          <span className="k">{commUSD > 0 ? "Ganancia neta" : "Tu ganancia"}</span>
           {cross ? (
-            <span className="v" style={calc.profitUSD < 0 ? { color: "var(--coral)" } : {}}>
-              {calc.profitUSD >= 0 ? "+" : ""}{fmtCur(calc.profitUSD, inCur)}
+            <span className="v" style={netProfitUSD < 0 ? { color: "var(--coral)" } : {}}>
+              {netProfitUSD >= 0 ? "+" : ""}{fmtCur(netProfitUSD, inCur)}
             </span>
           ) : (
-            <span className="v" style={calc.profitBs < 0 ? { color: "var(--coral)" } : {}}>
-              {calc.profitBs >= 0 ? "+" : ""}{fmt(calc.profitBs)} Bs
+            <span className="v" style={netProfitBs < 0 ? { color: "var(--coral)" } : {}}>
+              {netProfitBs >= 0 ? "+" : ""}{fmt(netProfitBs)} Bs
             </span>
           )}
         </div>
         {cross && (
           <div className="calc-row" style={{ paddingTop: 0 }}>
             <span className="k" style={{ fontSize: 11 }}>≈ en bolívares</span>
-            <span className="v" style={{ fontSize: 13, color: "var(--txt-soft)" }}>{fmt(calc.profitBs)} Bs</span>
+            <span className="v" style={{ fontSize: 13, color: "var(--txt-soft)" }}>{fmt(netProfitBs)} Bs</span>
           </div>
         )}
       </div>
@@ -1222,26 +1287,34 @@ function OpDetailSheet({ op, s, onClose }) {
 
       <div className="card" style={{ marginBottom: 16 }}>
         {op.cross ? (() => {
-          const profitUSD = +(op.inAmt - op.outAmt).toFixed(2);
-          const cpct = op.pct != null ? op.pct : (op.inAmt ? (profitUSD / op.inAmt) * 100 : 0);
+          const grossUSD = +(op.inAmt - op.outAmt).toFixed(2);
+          const cpct = op.pct != null ? op.pct : (op.inAmt ? (grossUSD / op.inAmt) * 100 : 0);
+          const netUSD = +(grossUSD - (op.commUSD || 0)).toFixed(2);
           return (
             <>
               <DtRow k="Tipo" v={`Cambio divisa ↔ divisa`} />
               <DtRow k="% comisión" v={`${cpct > 0 ? "+" : ""}${fmt(cpct, 2)}%`} accent={cpct >= 0} coral={cpct < 0} />
-              <DtRow k="Tu ganancia" v={`${profitUSD >= 0 ? "+" : ""}${fmtCur(profitUSD, inAcc?.currency)}`} accent={profitUSD >= 0} coral={profitUSD < 0} />
+              {op.commUSD > 0 && <DtRow k="Ganancia bruta" v={fmtCur(grossUSD, inAcc?.currency)} />}
+              {op.commUSD > 0 && <DtRow k="Comisiones banco+Binance" v={`−$${fmt(op.commUSD)}`} coral />}
+              <DtRow k={op.commUSD > 0 ? "Ganancia neta" : "Tu ganancia"} v={`${netUSD >= 0 ? "+" : ""}${fmtCur(netUSD, inAcc?.currency)}`} accent={netUSD >= 0} coral={netUSD < 0} />
               <DtRow k="≈ en bolívares" v={`${op.profitBs >= 0 ? "+" : ""}${fmt(op.profitBs)} Bs`} />
             </>
           );
-        })() : (
+        })() : (() => {
+          const grossBs = +(op.profitBs + (op.commUSD || 0) * op.rate).toFixed(2);
+          return (
           <>
             <DtRow k="Equivalente en divisa" v={`$${fmt(usd)}`} />
             <DtRow k="Tasa al cliente" v={`${fmt(op.rate, 2)} Bs/$`} />
             <DtRow k="Tasa de costo / base" v={`${fmt(op.costRate, 2)} Bs/$`} />
             <DtRow k="% de ganancia" v={`${pctOp > 0 ? "+" : ""}${fmt(pctOp, 2)}%`} accent={pctOp >= 0} coral={pctOp < 0} />
-            <DtRow k="Tu ganancia" v={`${op.profitBs >= 0 ? "+" : ""}${fmt(op.profitBs)} Bs`} accent={op.profitBs >= 0} coral={op.profitBs < 0} />
+            {op.commUSD > 0 && <DtRow k="Ganancia bruta" v={`${fmt(grossBs)} Bs`} />}
+            {op.commUSD > 0 && <DtRow k="Comisiones banco+Binance" v={`−$${fmt(op.commUSD)}`} coral />}
+            <DtRow k={op.commUSD > 0 ? "Ganancia neta" : "Tu ganancia"} v={`${op.profitBs >= 0 ? "+" : ""}${fmt(op.profitBs)} Bs`} accent={op.profitBs >= 0} coral={op.profitBs < 0} />
             <DtRow k="≈ ganancia en USD" v={`${op.profitBs >= 0 ? "+" : ""}${fmtUSD(op.profitBs / op.rate)}`} />
           </>
-        )}
+          );
+        })()}
       </div>
 
       <p className="dt-note">El comprobante que compartes con el cliente <b>no incluye</b> tu ganancia ni la tasa de costo.</p>

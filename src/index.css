@@ -580,6 +580,13 @@ input, select { font-family: inherit; }
 }
 .debt-toggle-x { font-size: 18px; color: var(--green); font-weight: 700; }
 
+/* comisiones (banco / binance) */
+.comm-row { display: flex; gap: 8px; align-items: stretch; }
+.unit-toggle { display: flex; background: var(--bg-2); border: 1px solid var(--line-hi); border-radius: var(--r-sm); padding: 3px; gap: 3px; }
+.unit-toggle button { width: 38px; border-radius: 9px; font-weight: 700; font-size: 14px; color: var(--txt-soft); }
+.unit-toggle button.on { background: var(--green); color: #0a1206; }
+.comm-hint { font-size: 11px; color: var(--txt-mute); margin-top: 5px; }
+
 /* ============================================================
    TABLA DE TASAS (BCV / Euro / Binance)
    ============================================================ */

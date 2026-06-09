@@ -95,7 +95,7 @@ export async function fetchLiveRates() {
   }
 }
 
-export function addOp({ clientId, inId, inAmt, outId, outAmt, rate, costRate, profitBs, pct, cross }) {
+export function addOp({ clientId, inId, inAmt, outId, outAmt, rate, costRate, profitBs, pct, cross, commUSD, comm }) {
   const usd = +inAmt;
   const computedProfit = profitBs != null
     ? +(+profitBs).toFixed(2)
@@ -108,6 +108,8 @@ export function addOp({ clientId, inId, inAmt, outId, outAmt, rate, costRate, pr
     rate: +rate, costRate: +costRate || +rate, profitBs: computedProfit,
     pct: pct != null && pct !== "" ? +pct : undefined,
     cross: !!cross,
+    commUSD: commUSD ? +(+commUSD).toFixed(2) : 0,
+    comm: comm || null,
   };
   const accounts = state.accounts.map((a) => {
     if (a.id === inId) return { ...a, balance: +(a.balance + (+inAmt)).toFixed(2) };
