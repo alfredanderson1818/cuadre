@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  CHANNELS, useStore, addOp, addClient, addAccount, addMovement, accountLedger, accountStats, setRate, clearData,
+  CHANNELS, useStore, addOp, addClient, addAccount, renameAccount, removeAccount, addMovement, accountLedger, accountStats, setRate, clearData,
   addDebt, setDebtPaid, removeDebt, pendingDebts, receivableUSD, payableUSD,
   accountById, clientById, totalUSD, balanceByKind, profitTotalBs, profitByDay,
   fmt, fmtUSD, fmtBs, fmtCur, relTime, toUSD,
@@ -162,6 +162,8 @@ function AccountDetailSheet({ account, s, onClose, openDetail }) {
   const [mode, setMode] = useState(null); // 'deposit' | 'withdraw' | 'adjust' | null
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [rn, setRn] = useState("");
   if (!account) return null;
   const meta = CHANNELS[account.kind];
   const cur = account.currency;
@@ -231,6 +233,23 @@ function AccountDetailSheet({ account, s, onClose, openDetail }) {
             </div>
           ))}
       </div>
+
+      <div className="divider" />
+      {renaming ? (
+        <div className="inline-add" style={{ borderStyle: "solid" }}>
+          <label style={{ fontSize: 12, color: "var(--txt-soft)", fontWeight: 600 }}>Nuevo nombre de la cuenta</label>
+          <input className="input" autoFocus value={rn} onChange={(e) => setRn(e.target.value)} placeholder="Ej: Banesco Panamá" />
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn btn-ghost" onClick={() => setRenaming(false)} style={{ flex: 1 }}>Cancelar</button>
+            <button className={`btn ${rn.trim() ? "btn-primary" : "btn-ghost"}`} onClick={() => { if (rn.trim()) { renameAccount(account.id, rn.trim()); setRenaming(false); } }} style={{ flex: 2 }}>Guardar nombre</button>
+          </div>
+        </div>
+      ) : (
+        <button className="btn btn-ghost" onClick={() => { setRn(account.name); setRenaming(true); }}>✏️ Cambiar nombre</button>
+      )}
+      <button className="btn btn-coral" style={{ marginTop: 10 }} onClick={() => {
+        if (confirm(`¿Eliminar la cuenta "${account.name}"? Esto no borra los cambios ya registrados.`)) { removeAccount(account.id); onClose(); }
+      }}>Eliminar cuenta</button>
     </Sheet>
   );
 }
@@ -1113,7 +1132,7 @@ function AccountSheet({ onClose }) {
   return (
     <Sheet onClose={onClose} title="Nueva cuenta" lead="Agrega un banco, billetera o canal a tu inventario.">
       <div className="field">
-        <label>Tipo de canal</label>
+        <label>Tipo de cuenta (define la moneda)</label>
         <div className="kind-grid">
           {Object.keys(CHANNELS).map((k) => (
             <button key={k} type="button" className={`kind-chip ${kind === k ? "on" : ""}`}
@@ -1125,10 +1144,14 @@ function AccountSheet({ onClose }) {
           ))}
         </div>
       </div>
+      <div className="cur-banner" style={{ borderColor: `color-mix(in srgb, ${meta.color} 40%, transparent)` }}>
+        Esta cuenta llevará el saldo en{" "}
+        <b style={{ color: meta.color }}>{meta.currency === "BS" ? "BOLÍVARES (Bs)" : meta.currency === "USDT" ? "USDT (₮)" : "DÓLARES ($)"}</b>
+      </div>
       <div className="field">
         <label>Nombre de la cuenta</label>
         <input className="input" value={name} onChange={(e) => setName(e.target.value)}
-          placeholder={kind === "bs" ? "Ej: Banesco" : kind === "usdt" ? "Ej: Binance USDT" : kind === "zelle" ? "Ej: Zelle, Wise…" : "Ej: Efectivo $"} />
+          placeholder={kind === "bs" ? "Ej: Banesco" : kind === "usdt" ? "Ej: Binance USDT" : kind === "zelle" ? "Ej: Banesco Panamá, Zelle, Wise…" : "Ej: Efectivo $"} />
       </div>
       <div className="field">
         <label>Saldo inicial ({suffix})</label>

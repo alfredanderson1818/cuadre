@@ -140,6 +140,16 @@ export function addAccount({ kind, name, balance }) {
   return a;
 }
 
+export function renameAccount(id, name) {
+  state = { ...state, accounts: state.accounts.map((a) => a.id === id ? { ...a, name } : a) };
+  emit();
+}
+
+export function removeAccount(id) {
+  state = { ...state, accounts: state.accounts.filter((a) => a.id !== id) };
+  emit();
+}
+
 // Movimiento de cuenta (no es un cambio): ingresar, retirar o ajustar saldo.
 export function addMovement({ accId, type, amount, note }) {
   const acc = state.accounts.find((a) => a.id === accId);
