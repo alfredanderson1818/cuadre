@@ -164,6 +164,7 @@ function AccountDetailSheet({ account, s, onClose, openDetail }) {
   const [note, setNote] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [rn, setRn] = useState("");
+  const [confirmDel, setConfirmDel] = useState(false);
   if (!account) return null;
   const meta = CHANNELS[account.kind];
   const cur = account.currency;
@@ -213,11 +214,19 @@ function AccountDetailSheet({ account, s, onClose, openDetail }) {
       )}
 
       <div className="acc-edit">
-        <button className="acc-edit-btn" onClick={() => { setRn(account.name); setRenaming(true); }}>✏️ Renombrar</button>
-        <button className="acc-edit-btn del" onClick={() => {
-          if (confirm(`¿Eliminar la cuenta "${account.name}"? Esto no borra los cambios ya registrados.`)) { removeAccount(account.id); onClose(); }
-        }}>🗑 Eliminar cuenta</button>
+        <button className="acc-edit-btn" onClick={() => { setRn(account.name); setRenaming(true); setConfirmDel(false); }}>✏️ Renombrar</button>
+        <button className="acc-edit-btn del" onClick={() => setConfirmDel((v) => !v)}>🗑 Eliminar cuenta</button>
       </div>
+      {confirmDel && (
+        <div className="warn-box" style={{ marginTop: -4 }}>
+          <div className="warn-top">¿Eliminar "{account.name}"?</div>
+          <div className="warn-sub">Esto no borra los cambios ya registrados, solo quita la cuenta de tu inventario.</div>
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setConfirmDel(false)}>Cancelar</button>
+            <button className="btn btn-coral" style={{ flex: 1 }} onClick={() => { removeAccount(account.id); onClose(); }}>Sí, eliminar</button>
+          </div>
+        </div>
+      )}
       {renaming && (
         <div className="inline-add" style={{ borderStyle: "solid", marginBottom: 16 }}>
           <label style={{ fontSize: 12, color: "var(--txt-soft)", fontWeight: 600 }}>Nuevo nombre de la cuenta</label>
@@ -1347,6 +1356,8 @@ function ProfileSheet({ session, onClose, onLogout }) {
   const email = p.email || session?.email || "";
   const [phone, setPhone] = useState(p.phone || "");
   const [saved, setSaved] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmOut, setConfirmOut] = useState(false);
 
   const [showPass, setShowPass] = useState(false);
   const [cp, setCp] = useState("");
@@ -1410,15 +1421,28 @@ function ProfileSheet({ session, onClose, onLogout }) {
       )}
 
       <div className="divider" />
-      <button className="btn btn-ghost" onClick={() => {
-        if (confirm("¿Borrar todas las cuentas, clientes y operaciones? Las tasas de referencia se conservan. Esto no se puede deshacer.")) {
-          clearData();
-          onClose();
-        }
-      }}>🧹 Borrar datos (dejar solo tasas)</button>
+      {!confirmClear ? (
+        <button className="btn btn-ghost" onClick={() => setConfirmClear(true)}>🧹 Borrar datos (dejar solo tasas)</button>
+      ) : (
+        <div className="warn-box">
+          <div className="warn-top">¿Borrar todos los datos?</div>
+          <div className="warn-sub">Se borran cuentas, clientes y operaciones (las tasas se conservan). No se puede deshacer.</div>
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setConfirmClear(false)}>Cancelar</button>
+            <button className="btn btn-coral" style={{ flex: 1 }} onClick={() => { clearData(); onClose(); }}>Sí, borrar</button>
+          </div>
+        </div>
+      )}
 
       <div className="divider" />
-      <button className="btn btn-coral" onClick={() => { if (confirm("¿Cerrar sesión?")) onLogout(); }}>Cerrar sesión</button>
+      {!confirmOut ? (
+        <button className="btn btn-coral" onClick={() => setConfirmOut(true)}>Cerrar sesión</button>
+      ) : (
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setConfirmOut(false)}>Cancelar</button>
+          <button className="btn btn-coral" style={{ flex: 1 }} onClick={onLogout}>Sí, salir</button>
+        </div>
+      )}
     </Sheet>
   );
 }
@@ -1562,6 +1586,7 @@ function DebtsSheet({ s, onClose }) {
 function DebtDetailSheet({ debt, s, onClose }) {
   const [settling, setSettling] = useState(false);
   const [acctId, setAcctId] = useState("");
+  const [confirmDel, setConfirmDel] = useState(false);
   if (!debt) return null;
   const theyOwe = debt.direction === "they_owe";
   const sym = debt.currency === "BS" ? "Bs" : debt.currency === "USDT" ? "₮" : "$";
@@ -1620,9 +1645,14 @@ function DebtDetailSheet({ debt, s, onClose }) {
           <button className="btn btn-ghost" onClick={() => setSettling(false)}>Cancelar</button>
         </div>
       )}
-      <button className="btn btn-coral" style={{ marginTop: 10 }} onClick={() => { if (confirm("¿Eliminar esta deuda?")) { removeDebt(debt.id); onClose(); } }}>
-        Eliminar deuda
-      </button>
+      {!confirmDel ? (
+        <button className="btn btn-coral" style={{ marginTop: 10 }} onClick={() => setConfirmDel(true)}>Eliminar deuda</button>
+      ) : (
+        <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setConfirmDel(false)}>Cancelar</button>
+          <button className="btn btn-coral" style={{ flex: 1 }} onClick={() => { removeDebt(debt.id); onClose(); }}>Sí, eliminar</button>
+        </div>
+      )}
     </Sheet>
   );
 }
