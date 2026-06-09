@@ -1128,7 +1128,7 @@ function AccountSheet({ onClose }) {
       <div className="field">
         <label>Nombre de la cuenta</label>
         <input className="input" value={name} onChange={(e) => setName(e.target.value)}
-          placeholder={kind === "bs" ? "Ej: Banesco" : kind === "usdt" ? "Ej: Binance USDT" : kind === "zelle" ? "Ej: Zelle · BofA" : "Ej: Efectivo $"} />
+          placeholder={kind === "bs" ? "Ej: Banesco" : kind === "usdt" ? "Ej: Binance USDT" : kind === "zelle" ? "Ej: Zelle, Wise…" : "Ej: Efectivo $"} />
       </div>
       <div className="field">
         <label>Saldo inicial ({suffix})</label>

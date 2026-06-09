@@ -8,7 +8,7 @@ import { supabase } from "./supabase";
 export const CHANNELS = {
   cash: { label: "USD efectivo", short: "Efectivo", icon: "$", color: "var(--c-cash)", currency: "USD" },
   usdt: { label: "USDT / cripto", short: "USDT", icon: "₮", color: "var(--c-usdt)", currency: "USDT" },
-  zelle: { label: "Zelle / Transfer", short: "Zelle", icon: "🇺🇸", color: "var(--c-zelle)", currency: "USD" },
+  zelle: { label: "Dólares", short: "Dólares", icon: "🇺🇸", color: "var(--c-zelle)", currency: "USD" },
   bs: { label: "Bolívares", short: "Bs", icon: "🇻🇪", color: "var(--c-bs)", currency: "BS" },
 };
 
@@ -290,7 +290,7 @@ function seedFresh() {
     accounts: [
       { id: "a1", kind: "cash", name: "Efectivo $", currency: "USD", balance: 0 },
       { id: "a2", kind: "usdt", name: "Binance USDT", currency: "USDT", balance: 0 },
-      { id: "a3", kind: "zelle", name: "Zelle", currency: "USD", balance: 0 },
+      { id: "a3", kind: "zelle", name: "Dólares", currency: "USD", balance: 0 },
       { id: "a4", kind: "bs", name: "Banco de Venezuela", currency: "BS", balance: 0 },
     ],
     clients: [],
@@ -314,7 +314,7 @@ function seedDemoState() {
     accounts: [
       { id: "a1", kind: "cash", name: "Efectivo $", currency: "USD", balance: 1850 },
       { id: "a2", kind: "usdt", name: "Binance USDT", currency: "USDT", balance: 3120 },
-      { id: "a3", kind: "zelle", name: "Zelle", currency: "USD", balance: 980 },
+      { id: "a3", kind: "zelle", name: "Dólares", currency: "USD", balance: 980 },
       { id: "a4", kind: "bs", name: "Banco de Venezuela", currency: "BS", balance: 1520000 },
       { id: "a5", kind: "bs", name: "Banesco", currency: "BS", balance: 760000 },
     ],
