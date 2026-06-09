@@ -537,6 +537,13 @@ input, select { font-family: inherit; }
 .acc-btn.in { color: var(--green); border-color: rgba(184,242,74,0.35); }
 .acc-btn.out { color: var(--coral); border-color: rgba(255,107,94,0.3); }
 .acc-btn.adj { color: var(--gold); border-color: rgba(245,196,81,0.3); }
+.acc-edit { display: flex; gap: 9px; margin: 12px 0 16px; }
+.acc-edit-btn {
+  flex: 1; padding: 11px 8px; border-radius: var(--r-sm); font-weight: 600; font-size: 13px;
+  background: var(--surface); border: 1px solid var(--line-hi); color: var(--txt-soft);
+}
+.acc-edit-btn:active { transform: scale(0.97); }
+.acc-edit-btn.del { color: var(--coral); border-color: rgba(255,107,94,0.3); }
 
 /* tarjeta Por cobrar / Por pagar (Inicio) */
 .debt-card {

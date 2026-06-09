@@ -212,6 +212,23 @@ function AccountDetailSheet({ account, s, onClose, openDetail }) {
         </div>
       )}
 
+      <div className="acc-edit">
+        <button className="acc-edit-btn" onClick={() => { setRn(account.name); setRenaming(true); }}>✏️ Renombrar</button>
+        <button className="acc-edit-btn del" onClick={() => {
+          if (confirm(`¿Eliminar la cuenta "${account.name}"? Esto no borra los cambios ya registrados.`)) { removeAccount(account.id); onClose(); }
+        }}>🗑 Eliminar cuenta</button>
+      </div>
+      {renaming && (
+        <div className="inline-add" style={{ borderStyle: "solid", marginBottom: 16 }}>
+          <label style={{ fontSize: 12, color: "var(--txt-soft)", fontWeight: 600 }}>Nuevo nombre de la cuenta</label>
+          <input className="input" autoFocus value={rn} onChange={(e) => setRn(e.target.value)} placeholder="Ej: Banesco Panamá" />
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn btn-ghost" onClick={() => setRenaming(false)} style={{ flex: 1 }}>Cancelar</button>
+            <button className={`btn ${rn.trim() ? "btn-primary" : "btn-ghost"}`} onClick={() => { if (rn.trim()) { renameAccount(account.id, rn.trim()); setRenaming(false); } }} style={{ flex: 2 }}>Guardar</button>
+          </div>
+        </div>
+      )}
+
       <div className="section-head" style={{ margin: "6px 2px 10px" }}>
         <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 16 }}>Movimientos</h3>
         <span className="link-btn" style={{ pointerEvents: "none", color: "var(--txt-mute)" }}>{led.length}</span>
@@ -233,23 +250,6 @@ function AccountDetailSheet({ account, s, onClose, openDetail }) {
             </div>
           ))}
       </div>
-
-      <div className="divider" />
-      {renaming ? (
-        <div className="inline-add" style={{ borderStyle: "solid" }}>
-          <label style={{ fontSize: 12, color: "var(--txt-soft)", fontWeight: 600 }}>Nuevo nombre de la cuenta</label>
-          <input className="input" autoFocus value={rn} onChange={(e) => setRn(e.target.value)} placeholder="Ej: Banesco Panamá" />
-          <div style={{ display: "flex", gap: 10 }}>
-            <button className="btn btn-ghost" onClick={() => setRenaming(false)} style={{ flex: 1 }}>Cancelar</button>
-            <button className={`btn ${rn.trim() ? "btn-primary" : "btn-ghost"}`} onClick={() => { if (rn.trim()) { renameAccount(account.id, rn.trim()); setRenaming(false); } }} style={{ flex: 2 }}>Guardar nombre</button>
-          </div>
-        </div>
-      ) : (
-        <button className="btn btn-ghost" onClick={() => { setRn(account.name); setRenaming(true); }}>✏️ Cambiar nombre</button>
-      )}
-      <button className="btn btn-coral" style={{ marginTop: 10 }} onClick={() => {
-        if (confirm(`¿Eliminar la cuenta "${account.name}"? Esto no borra los cambios ya registrados.`)) { removeAccount(account.id); onClose(); }
-      }}>Eliminar cuenta</button>
     </Sheet>
   );
 }
